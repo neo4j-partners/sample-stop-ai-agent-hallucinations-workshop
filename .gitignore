@@ -95,3 +95,7 @@ verify-worklog.md
 *-executed-*.ipynb
 *-verify.ipynb
 *-normalized.ipynb
+
+# Internal review + scratch harness (untracked, do not ship)
+verify-v2.md
+*-fix07-infra.ipynb
