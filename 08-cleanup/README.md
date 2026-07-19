@@ -105,6 +105,58 @@ bug B6 damaged and asserts none of those roles is selected.
   original incident. If you want it gone, remove it by hand.
 - **Anything untagged.**
 
+## Reclaiming Resources From a Run Before Tagging Existed
+
+Earlier versions of Modules 6 and 7 created resources without tagging them. Cleanup will refuse to
+delete those, correctly: it cannot prove it created them. If you ran this workshop before, you may be
+paying for orphans that this script reports and then leaves alone.
+
+They are safe to remove, but you have to confirm they are yours first. Deletion here is by hand and by
+eye, not by script, for the same reason the tag gate exists.
+
+**Step 1. List what cleanup is refusing to touch.** The dry run names them under `BLOCKED`:
+
+```bash
+python workshop_cleanup.py --dry-run
+```
+
+**Step 2. Confirm each one predates your tagged deployment.** Creation time is the evidence that a
+resource came from an older run rather than from something else you are running now:
+
+```bash
+aws dynamodb describe-table --table-name <name> --query 'Table.CreationDateTime'
+aws lambda get-function-configuration --function-name <name> --query 'LastModified'
+aws iam get-role --role-name <name> --query 'Role.CreateDate'
+aws ecr describe-repositories --repository-names <name> --query 'repositories[0].createdAt'
+```
+
+**Step 3. Check the whole account, not just this region.** IAM is global. Lambda, DynamoDB, ECR,
+CodeBuild and AgentCore are regional, so an old run in another region is invisible from this one.
+Repeat with `--region` for every region you have used.
+
+**Step 4. Delete by hand, one at a time, reading each name before you confirm it.**
+
+Do not write a loop that deletes everything matching `hotel-booking-*` or `workshop-*`. That is
+precisely the prefix-matching mistake documented above, and running it against your own account is how
+five unrelated roles were destroyed. If a name looks close but you cannot account for the resource,
+leave it and investigate.
+
+**A shortcut worth knowing.** Instead of deleting an old resource, you can adopt it by applying the
+workshop tag, after which cleanup will remove it normally:
+
+```bash
+aws dynamodb tag-resource --resource-arn <arn> \
+  --tags Key=WorkshopResource,Value=stop-ai-agent-hallucinations
+```
+
+Only do this for resources you have confirmed came from this workshop. Tagging something is a claim of
+ownership, and the next cleanup run will act on it.
+
+**What you will probably find.** The starter toolkit's shared `AmazonBedrockAgentCoreSDKCodeBuild-*`
+role and its `bedrock-agentcore-*-builder` CodeBuild projects survive teardown by design. They cost
+nothing, they are shared across projects, and deleting the role is what caused the original incident.
+Leaving them is the right outcome.
+
 ## Estimated Time
 
 2-3 minutes. Enumerating IAM role tags across a large account adds roughly a minute to the plan step.

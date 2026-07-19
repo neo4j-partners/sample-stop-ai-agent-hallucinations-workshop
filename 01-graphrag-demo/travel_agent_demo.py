@@ -115,6 +115,39 @@ def query_knowledge_graph(cypher_query: str) -> str:
 #
 # See all providers: https://strandsagents.com/docs/user-guide/concepts/model-providers/
 
+def graph_stats():
+    """Measure the corpus from the graph itself.
+
+    Every count this demo prints is read back from Neo4j at runtime. Hardcoding
+    them ("300 hotels", "175 with a pool") makes the summary drift silently the
+    moment the graph is rebuilt from a different sample — and the whole claim of
+    the demo is that Graph-RAG reports what is actually there.
+    """
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
+    try:
+        with driver.session() as session:
+            return session.run(
+                """
+                MATCH (h:Hotel)
+                WITH count(h) AS hotels
+                MATCH (p:Hotel)-[:OFFERS_AMENITY]->(a:Amenity)
+                WHERE toLower(a.name) CONTAINS 'pool'
+                WITH hotels, count(DISTINCT p) AS with_pool
+                MATCH (paris:Hotel) WHERE paris.address CONTAINS 'Paris'
+                RETURN hotels, with_pool,
+                       count(paris) AS paris_hotels,
+                       round(avg(paris.guest_rating), 2) AS paris_avg
+                """
+            ).single()
+    finally:
+        driver.close()
+
+
+STATS = graph_stats()
+HOTELS = STATS["hotels"]
+WITH_POOL = STATS["with_pool"]
+POOL_PCT = round(100 * WITH_POOL / HOTELS) if HOTELS else 0
+
 # Traditional RAG Agent
 rag_agent = Agent(
     name="RAG_Agent",
@@ -142,7 +175,7 @@ queries = [
     },
     {
         "query": "How many hotels in the database have a swimming pool?",
-        "insight": "RAG only sees top 3 docs, cannot count | Graph-RAG executes COUNT() across all 300 hotels"
+        "insight": f"RAG only sees top 3 docs, cannot count | Graph-RAG executes COUNT() across all {HOTELS} hotels in the graph"
     },
     {
         "query": "Which hotels in Cairo have both a spa and a swimming pool, and what are their guest ratings?",
@@ -177,10 +210,11 @@ for test in queries:
 print("\n" + "="*70)
 print("SUMMARY")
 print("="*70)
-print("""
-Data Used:
-  - 300 hotel FAQ documents (Paris: 2 hotels with ratings 4.9★, 4.5★)
-  - Swimming pools: 175 out of 300 hotels (~58%)
+print(f"""
+Data Used (measured from the graph at runtime, not hardcoded):
+  - {HOTELS} hotels in the knowledge graph
+  - Paris: {STATS['paris_hotels']} hotels, average guest rating {STATS['paris_avg']}★
+  - Swimming pools: {WITH_POOL} out of {HOTELS} hotels (~{POOL_PCT}%)
   - Knowledge graph: pinned schema (Hotel, Room, Amenity, Policy, Service)
 
 Why Graph-RAG Reduces Hallucinations:

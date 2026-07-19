@@ -24,12 +24,7 @@ MEMORY_MAX_TURNS = 3
 # To use a specific Bedrock model, pass the model ID as a string:
 #   MODEL = "us.anthropic.claude-sonnet-5"
 #
-# To use a different provider (e.g., OpenAI), install the extra and configure:
-#   pip install "strands-agents[openai]"
-#   from strands.models.openai import OpenAIModel
-#   MODEL = OpenAIModel(model_id="gpt-4o-mini")
-#   (requires OPENAI_API_KEY env var — get one at https://platform.openai.com/api-keys)
-#
+# This demo is Bedrock-only and needs no other provider credentials.
 # See all providers: https://strandsagents.com/docs/user-guide/concepts/model-providers/
 
 PROMPT = "You are a travel assistant. Use the correct tool to answer questions."

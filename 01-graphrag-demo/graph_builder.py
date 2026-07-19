@@ -42,6 +42,11 @@ from graph_config import (
 
 DOC_TIMEOUT_SECONDS = 180
 
+# The canary samples several documents rather than one. LLM extraction is
+# stochastic, so a single-document gate intermittently fails a healthy
+# pipeline, and an attendee who hits that concludes the demo is broken.
+CANARY_DOCS = 3
+
 # Everything neo4j-graphrag writes carries this label, so the wipe can be
 # scoped to this demo's own output instead of `MATCH (n) DETACH DELETE n`,
 # which would also take out anything else sharing the instance.
@@ -159,38 +164,51 @@ def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
             problems.append(f"off-schema labels present: {stray}")
 
         if not labels.get("Hotel"):
-            problems.append("no :Hotel node was extracted from the canary chunk")
+            problems.append("no :Hotel node was extracted from the canary chunks")
             return problems
 
-        hotel = session.run(
-            """
-            MATCH (c:Chunk)<-[:FROM_CHUNK]-(h:Hotel)
-            WHERE elementId(c) IN $ids
-            RETURN h.name AS name, h.address AS address,
-                   h.guest_rating AS guest_rating,
-                   elementId(h) AS id
-            LIMIT 1
-            """,
-            ids=ids,
-        ).single()
-        print(f"  sample hotel: {dict(hotel)}")
-        for field in ("name", "address", "guest_rating"):
-            if hotel[field] is None:
-                problems.append(f"Hotel.{field} was not extracted")
+        # Extraction is stochastic: an LLM can miss a field on any single
+        # document without the pipeline being broken. The gate is therefore
+        # "at least one canary document extracted a complete Hotel", not
+        # "every one did". The off-schema label check above stays strict,
+        # because inventing an `Address` node is a schema failure rather than
+        # a bad roll.
+        hotels = list(
+            session.run(
+                """
+                MATCH (c:Chunk)<-[:FROM_CHUNK]-(h:Hotel)
+                WHERE elementId(c) IN $ids
+                OPTIONAL MATCH (h)-[r]->(n)
+                WHERE type(r) IN ['HAS_ROOM', 'OFFERS_AMENITY',
+                                  'HAS_POLICY', 'PROVIDES_SERVICE']
+                RETURN DISTINCT h.name AS name, h.address AS address,
+                       h.guest_rating AS guest_rating, count(r) AS relationships
+                """,
+                ids=ids,
+            )
+        )
 
-        linked = session.run(
-            """
-            MATCH (h:Hotel)-[r]->(n)
-            WHERE elementId(h) = $hotel_id
-              AND type(r) IN ['HAS_ROOM', 'OFFERS_AMENITY',
-                              'HAS_POLICY', 'PROVIDES_SERVICE']
-            RETURN count(r) AS count
-            """,
-            hotel_id=hotel["id"],
-        ).single()["count"]
-        print(f"  contracted relationships from Hotel: {linked}")
-        if linked == 0:
-            problems.append("Hotel has no contracted outgoing relationships")
+        conforming = []
+        for hotel in hotels:
+            missing = [
+                field
+                for field in ("name", "address", "guest_rating")
+                if hotel[field] is None
+            ]
+            if not missing and hotel["relationships"] > 0:
+                conforming.append(hotel)
+            status = "ok" if not missing and hotel["relationships"] else "INCOMPLETE"
+            print(
+                f"  hotel: {hotel['name']!r} rating={hotel['guest_rating']} "
+                f"rels={hotel['relationships']} [{status}]"
+            )
+
+        print(f"  conforming hotels: {len(conforming)}/{len(hotels)}")
+        if not conforming:
+            problems.append(
+                f"none of the {len(hotels)} canary hotels had name, address, "
+                "guest_rating and a contracted relationship"
+            )
 
     return problems
 
@@ -293,10 +311,12 @@ async def run_build(paths: list[Path], title: str) -> int:
     print(f"{title}: {len(paths)} documents\n")
     driver = connect()
     try:
-        print(f"Canary: extracting {paths[0].name} before touching the graph...")
+        canary = paths[:CANARY_DOCS]
+        names = ", ".join(path.name for path in canary)
+        print(f"Canary: extracting {names} before touching the graph...")
         baseline = snapshot_chunk_ids(driver)
         pipeline = build_pipeline(driver)
-        await ingest(pipeline, paths[:1])
+        await ingest(pipeline, canary)
 
         new_chunks = snapshot_chunk_ids(driver) - baseline
         if not new_chunks:

@@ -92,4 +92,6 @@ faqs_vector_lite.index
 logs/
 verify-worklog.md
 *-executed.ipynb
+*-executed-*.ipynb
+*-verify.ipynb
 *-normalized.ipynb
