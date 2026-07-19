@@ -98,7 +98,7 @@ def confirm_booking(booking_id: str) -> str:
 # Model configuration — Amazon Bedrock (default, requires AWS credentials)
 # Strands Agents uses Bedrock by default. No extra import needed.
 # To use a specific Bedrock model, pass the model ID as a string:
-#   MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+#   MODEL = "us.anthropic.claude-sonnet-5"
 #
 # To use a different provider (e.g., OpenAI), install the extra and configure:
 #   pip install "strands-agents[openai]"

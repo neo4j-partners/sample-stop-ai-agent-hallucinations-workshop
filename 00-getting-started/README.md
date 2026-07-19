@@ -71,7 +71,7 @@ To specify a model explicitly:
 
 ```python
 agent = Agent(
-    model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    model="us.anthropic.claude-sonnet-5",
     system_prompt="You are a helpful assistant.",
 )
 ```
