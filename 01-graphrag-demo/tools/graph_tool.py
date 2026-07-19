@@ -8,7 +8,17 @@ Used by:
 """
 
 import os
+
+from dotenv import find_dotenv, load_dotenv
 from neo4j import GraphDatabase
+
+# Load the demo's .env when this module is imported outside a notebook.
+# Without this, importing graph_tool from another script (for example the
+# semantic-tools demo) silently falls back to bolt://localhost:7687 with the
+# default password instead of the real credentials. find_dotenv walks up from
+# this file's directory, so it locates 01-graphrag-demo/.env regardless of the
+# current working directory.
+load_dotenv(find_dotenv(usecwd=False))
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
@@ -50,33 +60,3 @@ def query_hotel_knowledge_graph(cypher_query: str) -> str:
             return f"Query error: {str(e)}"
         finally:
             driver.close()
-
-
-# Keep old functions for backward compatibility but marked as deprecated
-def search_hotels_by_country(country: str, min_rating: float = 0.0) -> str:
-    """[DEPRECATED] Use query_hotel_knowledge_graph instead.
-
-    Search hotels in a specific country with minimum rating from Neo4j."""
-    query = f"""
-    MATCH (h:Hotel)
-    WHERE h.address CONTAINS '{country}' OR h.name CONTAINS '{country}'
-    AND coalesce(h.guest_rating, 0) >= {min_rating}
-    RETURN h.name AS name, h.address AS address, h.guest_rating AS rating, h.total_rooms AS rooms
-    ORDER BY h.guest_rating DESC
-    LIMIT 10
-    """
-    return query_hotel_knowledge_graph(query)
-
-
-def get_top_rated_hotels(limit: int = 5) -> str:
-    """[DEPRECATED] Use query_hotel_knowledge_graph instead.
-
-    Get top-rated hotels from Neo4j knowledge graph."""
-    query = f"""
-    MATCH (h:Hotel)
-    WHERE h.guest_rating IS NOT NULL
-    RETURN h.name AS name, h.address AS address, h.guest_rating AS rating, h.total_rooms AS rooms
-    ORDER BY h.guest_rating DESC
-    LIMIT {limit}
-    """
-    return query_hotel_knowledge_graph(query)

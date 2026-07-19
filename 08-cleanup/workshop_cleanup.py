@@ -174,7 +174,7 @@ class Candidate:
             ),
             Selection.ABSENT: "not found",
             Selection.UNTAGGABLE_EXACT_NAME: (
-                "exact name match; AWS does not support tags on this kind"
+                "matched exactly, never by name shape or tag"
             ),
         }[self.selection]
         line = f"{'DELETE' if self.will_delete else 'SKIP  '}  {self.kind:<24} {target:<52} {reason}"
@@ -498,7 +498,7 @@ def discover_local_config(_clients: Clients) -> Iterator[Candidate]:
             kind="local-config-file",
             name=path,
             selection=Selection.UNTAGGABLE_EXACT_NAME,
-            detail="local file, not an AWS resource",
+            detail="local file at a fixed repo-relative path, not an AWS resource",
         )
 
 

@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
@@ -39,7 +40,7 @@ load_dotenv()
 from strands import Agent
 from strands.hooks import HookProvider, HookRegistry, BeforeToolCallEvent
 
-from tools import ALL_TOOLS
+from tools import ALL_TOOLS, reset_state
 
 CONTROLS_FILE = Path(__file__).with_name("controls.yaml")
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
@@ -56,7 +57,10 @@ DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 # steering is bounded".
 MAX_STEERS = 1
 
-QUERY = "Book AnyCompany Lisbon Resort for 15 guests from 2026-05-01 to 2026-05-03"
+# Dates are computed relative to today so a fixed date cannot rot into the past.
+CHECK_IN = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+CHECK_OUT = (datetime.now() + timedelta(days=32)).strftime("%Y-%m-%d")
+QUERY = f"Book AnyCompany Lisbon Resort for 15 guests from {CHECK_IN} to {CHECK_OUT}"
 
 # System prompt that makes the LLM describe the booking before calling the tool.
 # This is needed so the steer control can detect "15 guests" in the LLM text output.
@@ -121,7 +125,7 @@ def resolve_control_plane(server_url: str, allow_local: bool, timeout: float = 3
     agents_route = _http_status(f"{server_url}/api/v1/agents", timeout)
 
     # 404 on the Agent Control API surface means whatever answered is not Agent Control.
-    if health is not None and agents_route is not None and agents_route != 404:
+    if health == 200 and agents_route is not None and agents_route != 404:
         return ControlPlane("server", server_url, f"Agent Control server at {server_url}")
 
     if health is None and agents_route is None:
@@ -249,6 +253,7 @@ def run_test_1_hooks() -> dict:
     print("=" * 70)
     print(f"Query: {QUERY}\n")
 
+    reset_state()  # isolate this test from any earlier run
     hook = MaxGuestsHook()
     agent = Agent(system_prompt=PROMPT, tools=ALL_TOOLS, hooks=[hook])
 
@@ -294,6 +299,7 @@ def run_test_2_agent_control(plane: ControlPlane) -> dict:
     print(f"Controls: {plane.detail}")
     print(f"Query: {QUERY}\n")
 
+    reset_state()  # isolate this test from Test 1
     try:
         import agent_control
         from agent_control.integrations.strands import (

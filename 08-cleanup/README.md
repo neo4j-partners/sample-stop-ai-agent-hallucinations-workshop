@@ -71,12 +71,12 @@ or delete it by hand once you have confirmed it is yours.
 
 ### The two documented exceptions
 
-`UNTAGGABLE_KINDS` in `workshop_cleanup.py` lists the only things matched by name rather than tag:
+`UNTAGGABLE_KINDS` in `workshop_cleanup.py` lists the only things matched directly rather than by tag:
 
-- **Lambda layer versions** — AWS does not support tags on them.
-- **Local `.bedrock_agentcore*.yaml` config files** — not AWS resources.
+- **Lambda layer versions.** AWS does not support tags on them, so they are matched by exact name.
+- **Local `.bedrock_agentcore.yaml` config files.** Not AWS resources. They are matched by fixed repo-relative path, one per demo directory, never by glob.
 
-Both use *exact* name equality, not prefixes. A unit test pins the contents of that set so the
+Both are matched exactly, never by prefix or glob. A unit test pins the contents of that set so the
 exemption cannot quietly grow.
 
 ## Failures Are Loud
