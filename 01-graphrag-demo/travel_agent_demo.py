@@ -16,9 +16,7 @@ import json
 import boto3
 import numpy as np
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+from graph_config import NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
 
 # Amazon Bedrock Nova 2 for embeddings
 _bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -66,25 +64,26 @@ def query_knowledge_graph(cypher_query: str) -> str:
     Cypher is Neo4j's query language for graph databases. It uses pattern matching
     to query relationships between entities. Think of it like SQL for graphs.
     
-    Example: MATCH (h:Hotel)-[:HAS_ROOM]->(r:Room) WHERE h.name = 'Marriott' RETURN r.price
-    
+    Example: MATCH (h:Hotel)-[:HAS_ROOM]->(r:Room) WHERE h.name = 'Marriott' RETURN r.max_rate
+
     Node labels: Hotel, Room, Amenity, Policy, Service
-    
-    Hotel properties: name, address, guestRating, totalRooms, email, phone
-    Room properties: name (e.g. "Standard Room"), price, maxOccupancy
-    Amenity properties: name (e.g. "Outdoor Swimming Pool", "WiFi")
-    Policy properties: name (e.g. "Check-in Policy"), details
-    
+    Hotel properties: name, address, guest_rating, total_rooms, email, phone
+    Room properties: type, bed_configuration, max_occupancy, min_rate, max_rate
+    Amenity properties: name, description, fee
+    Policy properties: name, description
+    Service properties: name, description, cost, hours, is_available, is_complimentary
+
     Relationships:
     - (Hotel)-[:HAS_ROOM]->(Room)
     - (Hotel)-[:OFFERS_AMENITY]->(Amenity)
     - (Hotel)-[:HAS_POLICY]->(Policy)
     - (Hotel)-[:PROVIDES_SERVICE]->(Service)
-    
+
     Location is in Hotel.address property (e.g. "789 Corniche el-Nil, Cairo 11519").
     To find hotels by location, use: WHERE h.address CONTAINS 'Cairo'
+    IMPORTANT: All property names use snake_case (e.g. guest_rating NOT guestRating)
     """
-    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     
     with driver.session() as session:
         try:
@@ -182,7 +181,7 @@ print("""
 Data Used:
   - 300 hotel FAQ documents (Paris: 2 hotels with ratings 4.9★, 4.5★)
   - Swimming pools: 175 out of 300 hotels (~58%)
-  - Knowledge graph: Auto-extracted entities (Hotel, City, Country, Amenity)
+  - Knowledge graph: pinned schema (Hotel, Room, Amenity, Policy, Service)
 
 Why Graph-RAG Reduces Hallucinations:
   1. Structured queries: Cypher forces precise logic (AVG, COUNT, WHERE...AND)

@@ -24,7 +24,7 @@ Research ([Internal Representations, 2025](https://arxiv.org/abs/2601.05214)) id
 
 **The dual problem**:
 - ❌ **Hallucination risk**: More tools = more inappropriate selections
-- ❌ **Token waste**: Sending all tool descriptions on every call (29 tools = ~4,000 tokens per query)
+- ❌ **Token waste**: Sending all tool descriptions on every call. Measured at ~6,500 tokens per query for 29 tools in this demo, counting the tool schemas plus system prompt, user turn, tool results, and model output.
 
 ## The Solution
 
@@ -107,7 +107,7 @@ Open `test_semantic_tools_hallucinations.ipynb` in your IDE (VS Code, Kiro, or a
 ```
 
 **What it does**:
-1. Tests 13 travel queries on 29 tools
+1. Tests 24 travel queries on 29 tools
 2. Compares Traditional (all 29 tools) vs Semantic (top 3 filtered)
 3. Verifies against ground truth (real hotel database)
 4. Shows token savings and error reduction
@@ -132,26 +132,53 @@ uv run token_comparison_app.py
 - Demonstrates memory accumulation cost
 - Verifies `swap_tools()` preserves conversation history
 
-**Expected output**:
+**Measured output** (real stdout from `token_comparison_app.py`, 3 queries):
+
+```
+Total tokens:
+  Traditional:      17242 tokens
+  Semantic:          6618 tokens (+61.6%)
+  Semantic+Memory:   8239 tokens (+52.2%)
+
+Query                                             Trad      Sem      Mem    Saved
+----------------------------------------------------------------------
+What's the weather in Paris?                      6802     1739     1742     5060
+Find flights from NYC to London                   7032     1960     2338     4694
+Book a hotel in Rome for John                     3408     2919     4159     -751
+```
+
+The 24-query notebook measures the same effect at larger scale:
+
+```
+💰 Token Consumption:
+   Traditional:      155,322 tokens (6472 avg)
+   Semantic:         40,259 tokens (1677 avg)
+   Semantic+Memory:  88,081 tokens (3670 avg)
+
+💡 Token Savings (measured this run, not a cited figure):
+   Semantic vs Traditional:  115,063 tokens (74.1% reduction)
+   Memory vs Traditional:    67,241 tokens (43.3% reduction)
+```
+
+**These numbers are LLM output and vary between runs.** Expect roughly 60-75% reduction for the semantic approach depending on query mix and turn count, not a single fixed figure. The 3-query script and the 24-query notebook measure different workloads and should not be expected to agree.
 
 ![Token reduction comparison — traditional vs semantic vs memory](images/semantic-tools-demo-tokens-reduction.png)
 
 ![Accuracy and token cost comparison charts](images/semantic-tool-selection-results.png)
 
-**Token breakdown**:
-- **Traditional**: 29 tools × 50 tokens = ~1450 tokens/query (constant)
-- **Semantic**: 3 tools × 50 tokens = ~150 tokens/query (constant)
-- **Memory**: ~150 tokens + conversation history (~400 tokens/turn, accumulates)
+**Where the savings come from**: the tool schemas are the only part of the prompt that semantic filtering removes. Dropping 29 schemas to 3 is the constant-size win. System prompt, user turn, tool results, and model output are unaffected and are included in every figure above, which is why the measured reduction is below what a schema-only calculation predicts.
+
+**Bounded conversation history**: the memory variant trims to the last 3 turns via `trim_history()`. Without a bound, the full transcript is resent on every call, cost grows quadratically with turn count, and the memory variant becomes more expensive than sending all 29 tools every time.
 
 ## How It Works
 
 ### Traditional Approach (Baseline)
 ```python
-# Agent sees ALL 31 tools on every query
+# Agent sees ALL 29 tools on every query
 agent = Agent(tools=ALL_TOOLS, model=model)
 agent("How much does Hotel Marriott cost?")
-# Token cost: ~4,500 tokens (31 tool descriptions)
-# Risk: Picks wrong tool from 31 options
+# Measured: ~6,500 tokens/query across the 24-query notebook run
+# Risk: Picks wrong tool from 29 options
 ```
 
 ### Semantic Approach (Optimized)
@@ -167,7 +194,7 @@ relevant_tools = search_tools(query, top_k=3)
 # 3. Agent sees only 3 relevant tools
 agent = Agent(tools=relevant_tools, model=model)
 agent(query)
-# Token cost: ~500 tokens (3 tool descriptions)
+# Measured: ~1,700 tokens/query across the same run
 # Risk: Picks correct tool from 3 focused options
 ```
 
@@ -234,11 +261,17 @@ This demo implements findings from:
 
 ### How much does semantic tool selection reduce token usage?
 
-Semantic filtering reduces token consumption by approximately 89%. Instead of sending all 29 tool descriptions (~1,450 tokens) on every query, FAISS-based filtering selects the top 3 relevant tools (~150 tokens). This reduction is constant per query and compounds across multi-turn conversations.
+**Measured in this demo: 61.6% over 3 queries (`token_comparison_app.py`) and 74.1% over 24 queries (`token_efficiency_analysis.ipynb`).** Both figures are LLM output and move between runs, so treat 60-75% as the range this demo reproduces rather than a fixed number.
+
+FAISS-based filtering sends the top 3 tool schemas instead of all 29. That saving is constant per query, but it applies only to the schema portion of the prompt. System prompt, user turn, tool results, and model output are unchanged, which is why the end-to-end reduction lands below a schema-only estimate.
+
+A separate published figure of **89%** comes from a third-party writeup, [rconnect.tech](https://www.rconnect.tech/blog/semantic-tool-selection-guide). It is a citation from someone else's production system, not a result this demo produces.
 
 ### Does filtering tools break conversation memory?
 
-No. Strands Agents' `swap_tools()` function changes the available tools at runtime without recreating the agent, preserving the full conversation history in `agent.messages`. This is a key production advantage over frameworks that require agent recreation to change tools.
+No. Strands Agents' `swap_tools()` function changes the available tools at runtime without recreating the agent, preserving conversation history in `agent.messages`. This is a key production advantage over frameworks that require agent recreation to change tools.
+
+Preserved history is not free. It is resent on every call, so an unbounded transcript grows cost quadratically with turn count and will overtake the saving from filtering tools. This demo bounds history to the last 3 turns with `trim_history()`. Measured over 24 queries, the bounded memory variant uses 88,081 tokens against a 155,322-token traditional baseline, a 43.3% reduction. It costs more than stateless semantic filtering at 40,259 tokens, which is the price of keeping the conversation.
 
 ### Can I use semantic tool selection with other agent frameworks?
 
