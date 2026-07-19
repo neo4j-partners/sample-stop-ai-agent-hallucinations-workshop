@@ -62,7 +62,7 @@ Before starting, make sure you have:
 - **[Python](https://python.org/downloads) 3.11+** installed
 - **[uv](https://docs.astral.sh/uv/)** package manager ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
 - **[AWS CLI](https://aws.amazon.com/cli/)** installed and configured with credentials for your account
-- **Amazon Bedrock access** — enable `us.anthropic.claude-sonnet-4-5` (or equivalent) in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess)
+- **Amazon Bedrock access** — enable `us.anthropic.claude-sonnet-5` (or equivalent) in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess)
 
 ### Step 1: Install dependencies
 

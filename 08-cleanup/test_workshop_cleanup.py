@@ -16,6 +16,7 @@ Run with::
 from __future__ import annotations
 
 import ast
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,27 @@ from typing import Any
 from botocore.exceptions import ClientError
 
 import workshop_cleanup as wc
+
+_TMPDIR: tempfile.TemporaryDirectory[str] | None = None
+
+
+def setUpModule() -> None:
+    """Point the local-config paths at a throwaway directory.
+
+    ``wc.CONFIG_FILES`` holds real paths inside this repo. A non-dry test run
+    calls the real ``Path.unlink`` on them, so without this the suite would
+    delete a developer's live ``.bedrock_agentcore.yaml`` as a side effect of
+    running the tests.
+    """
+    global _TMPDIR
+    _TMPDIR = tempfile.TemporaryDirectory()
+    wc.CONFIG_FILES = [str(Path(_TMPDIR.name) / "absent.bedrock_agentcore.yaml")]
+
+
+def tearDownModule() -> None:
+    if _TMPDIR is not None:
+        _TMPDIR.cleanup()
+
 
 TAG = {wc.WORKSHOP_TAG_KEY: wc.WORKSHOP_TAG_VALUE}
 TAG_KV = [{"Key": wc.WORKSHOP_TAG_KEY, "Value": wc.WORKSHOP_TAG_VALUE}]
@@ -99,6 +121,10 @@ class FakeIam:
 
     def delete_role(self, **kwargs: Any) -> None:
         self.rec.record("delete_role", **kwargs)
+        # Deletion must actually take effect in the fake, otherwise the absence
+        # probes added for B42 would poll forever against a resource the fake
+        # keeps insisting still exists.
+        self.roles.pop(kwargs["RoleName"], None)
 
 
 class FakeAgentCore:
@@ -130,6 +156,26 @@ class FakeAgentCore:
         self.rec.record("delete_memory", **kwargs)
         if self.delete_memory_error is not None:
             raise self.delete_memory_error
+        # A delete that does not change the fake's state cannot be observed, and
+        # observation is exactly what B42's fix requires.
+        self.memories = [m for m in self.memories if m["id"] != kwargs["memoryId"]]
+
+    # --- absence probes (B42) -------------------------------------------------
+
+    def get_memory(self, memoryId: str, **_kw: Any) -> dict[str, Any]:
+        match = next((m for m in self.memories if m["id"] == memoryId), None)
+        if match is None:
+            raise not_found("ResourceNotFoundException")
+        return {"memory": match}
+
+    def get_agent_runtime(self, **_kw: Any) -> dict[str, Any]:
+        raise not_found("ResourceNotFoundException")
+
+    def get_gateway(self, **_kw: Any) -> dict[str, Any]:
+        raise not_found("ResourceNotFoundException")
+
+    def get_gateway_target(self, **_kw: Any) -> dict[str, Any]:
+        raise not_found("ResourceNotFoundException")
 
 
 class FakeEmpty:
@@ -143,6 +189,9 @@ class FakeEmpty:
 
     def list_layer_versions(self, **_kw: Any) -> dict[str, Any]:
         return {"LayerVersions": []}
+
+    def get_layer_version(self, **_kw: Any) -> dict[str, Any]:
+        raise not_found("ResourceNotFoundException")
 
     def describe_table(self, **_kw: Any) -> dict[str, Any]:
         raise not_found("ResourceNotFoundException")
@@ -318,6 +367,131 @@ class TestMemory(unittest.TestCase):
 
         exit_code = wc.run(clients, dry_run=False)
         self.assertEqual(exit_code, 1, "a failed delete must exit non-zero, not report success")
+
+
+class TestAsyncDeletionWaits(unittest.TestCase):
+    """B42 — 'still deleting' and 'failed' are different states.
+
+    The old code reported deletion the moment the API accepted the request, and
+    a resource that was merely mid-delete surfaced as exit 1. These tests pin
+    both halves: a slow delete must succeed, and a delete that never lands must
+    still fail.
+    """
+
+    def setUp(self) -> None:
+        self._real_timeout = wc.WAIT_TIMEOUT
+        self._real_sleep = wc.time.sleep
+        wc.WAIT_TIMEOUT = 1.0  # keep the suite fast
+        wc.time.sleep = lambda _seconds: None
+
+    def tearDown(self) -> None:
+        wc.WAIT_TIMEOUT = self._real_timeout
+        wc.time.sleep = self._real_sleep
+
+    def _tagged_memory_clients(self, recorder: Recorder, agentcore: Any) -> wc.Clients:
+        return make_clients(recorder, agentcore=agentcore)
+
+    def test_resource_that_lingers_then_disappears_still_exits_zero(self) -> None:
+        """A DELETING resource that eventually goes is a success, not a failure."""
+
+        class SlowAgentCore(FakeAgentCore):
+            def __init__(self, recorder: Recorder) -> None:
+                super().__init__(
+                    recorder,
+                    memories=[TestMemory.LIVE_SHAPE],
+                    tags_by_arn={TestMemory.LIVE_SHAPE["arn"]: dict(TAG)},
+                )
+                self.probes_before_gone = 3
+
+            def delete_memory(self, **kwargs: Any) -> None:
+                # Accept the request but keep reporting the resource for a while,
+                # exactly as AgentCore does.
+                self.rec.record("delete_memory", **kwargs)
+
+            def get_memory(self, memoryId: str, **_kw: Any) -> dict[str, Any]:
+                if self.probes_before_gone > 0:
+                    self.probes_before_gone -= 1
+                    return {"memory": {**TestMemory.LIVE_SHAPE, "status": "DELETING"}}
+                raise not_found("ResourceNotFoundException")
+
+        recorder = Recorder()
+        clients = self._tagged_memory_clients(recorder, SlowAgentCore(recorder))
+
+        exit_code = wc.run(clients, dry_run=False)
+        self.assertEqual(
+            exit_code, 0, "a resource observed DELETING and then gone is a clean teardown"
+        )
+
+    def test_resource_that_never_goes_away_exits_nonzero(self) -> None:
+        """The exit-code contract must not be weakened: a real leak still fails."""
+
+        class StuckAgentCore(FakeAgentCore):
+            def __init__(self, recorder: Recorder) -> None:
+                super().__init__(
+                    recorder,
+                    memories=[TestMemory.LIVE_SHAPE],
+                    tags_by_arn={TestMemory.LIVE_SHAPE["arn"]: dict(TAG)},
+                )
+
+            def delete_memory(self, **kwargs: Any) -> None:
+                self.rec.record("delete_memory", **kwargs)  # accepted, never lands
+
+            def get_memory(self, memoryId: str, **_kw: Any) -> dict[str, Any]:
+                return {"memory": {**TestMemory.LIVE_SHAPE, "status": "DELETING"}}
+
+        recorder = Recorder()
+        clients = self._tagged_memory_clients(recorder, StuckAgentCore(recorder))
+
+        exit_code = wc.run(clients, dry_run=False)
+        self.assertEqual(exit_code, 1, "a resource that never disappears is a real leak")
+
+    def test_delete_already_in_flight_is_not_a_failure(self) -> None:
+        """A re-run hitting ConflictException on a DELETING resource must not fail."""
+
+        class ConflictingAgentCore(FakeAgentCore):
+            def __init__(self, recorder: Recorder) -> None:
+                super().__init__(
+                    recorder,
+                    memories=[TestMemory.LIVE_SHAPE],
+                    tags_by_arn={TestMemory.LIVE_SHAPE["arn"]: dict(TAG)},
+                )
+                self.gone = False
+
+            def delete_memory(self, **kwargs: Any) -> None:
+                self.rec.record("delete_memory", **kwargs)
+                raise not_found("ConflictException")
+
+            def get_memory(self, memoryId: str, **_kw: Any) -> dict[str, Any]:
+                if not self.gone:
+                    self.gone = True
+                    return {"memory": {**TestMemory.LIVE_SHAPE, "status": "DELETING"}}
+                raise not_found("ResourceNotFoundException")
+
+        recorder = Recorder()
+        clients = self._tagged_memory_clients(recorder, ConflictingAgentCore(recorder))
+
+        exit_code = wc.run(clients, dry_run=False)
+        self.assertEqual(exit_code, 0, "ConflictException means in flight, not failed")
+
+    def test_every_deletable_kind_is_assigned_a_tier(self) -> None:
+        """A kind missing from DELETION_TIERS would be silently skipped."""
+        tiered = {kind for _, kinds in wc.DELETION_TIERS for kind in kinds}
+        handled = {
+            node.pattern.value.value
+            for node in ast.walk(
+                ast.parse((Path(__file__).parent / "workshop_cleanup.py").read_text())
+            )
+            if isinstance(node, ast.match_case)
+            and isinstance(node.pattern, ast.MatchValue)
+            and isinstance(node.pattern.value, ast.Constant)
+            and isinstance(node.pattern.value.value, str)
+        }
+        self.assertTrue(handled, "expected to find the match/case delete handlers")
+        self.assertEqual(
+            handled - tiered,
+            set(),
+            "every kind with a delete handler must appear in DELETION_TIERS",
+        )
 
 
 class TestDryRun(unittest.TestCase):

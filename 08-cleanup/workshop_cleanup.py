@@ -15,6 +15,11 @@ Safety contract
    forgot to tag.
 3. **No failure is swallowed.** Every error is recorded and forces a non-zero
    exit. A cleanup script that lies about success is worse than one that crashes.
+4. **Success is observed, never assumed.** Accepting a delete request is not the
+   same as the resource being gone. Every tier is polled until the describe call
+   reports the resource absent, and only then does the next tier start. ``DELETING``
+   means keep waiting; absence means done; anything still standing when the
+   timeout expires is a real failure and is named in the output. See bug B42.
 
 Usage::
 
@@ -29,7 +34,6 @@ different region. See ``verify.md`` bug B6.
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import sys
 import time
@@ -78,7 +82,21 @@ LAMBDA_LAYER_NAME = "workshop-neo4j-driver"
 ECR_REPOS = [f"bedrock-agentcore-{name.lower()}" for name in RUNTIME_NAMES]
 CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 
-CONFIG_GLOBS = [".bedrock_agentcore*.yaml", "~/.bedrock_agentcore*.yaml"]
+#: Exact config files this workshop creates. Modules 6 and 7 each run the starter
+#: toolkit from their own directory, and the toolkit writes ``.bedrock_agentcore.yaml``
+#: into that directory.
+#:
+#: This was previously a glob list that included ``~/.bedrock_agentcore*.yaml``. HOME is
+#: shared with every other AgentCore project on the machine, so running this teardown
+#: destroyed unrelated local config. That is bug B6's mistake on the filesystem instead
+#: of in IAM: matching by name shape across a shared namespace. See bug B45.
+#:
+#: Exact repo-relative paths only. Never a glob, and never anything under HOME.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_FILES = [
+    str(_REPO_ROOT / "06-agentcore-boto3-demo" / ".bedrock_agentcore.yaml"),
+    str(_REPO_ROOT / "07-agentcore-memory-demo" / ".bedrock_agentcore.yaml"),
+]
 
 
 class Selection(StrEnum):
@@ -97,6 +115,35 @@ UNTAGGABLE_KINDS = frozenset({"lambda-layer-version", "local-config-file"})
 
 #: Selections that authorise a delete call.
 DELETABLE = frozenset({Selection.TAGGED, Selection.UNTAGGABLE_EXACT_NAME})
+
+#: How long to wait for one tier of resources to actually disappear, in seconds.
+WAIT_TIMEOUT = 600.0
+
+#: Deletion order. Every tier is deleted, then polled to actual absence, before
+#: the next tier is touched. The order is a dependency order, and getting it
+#: wrong is exactly what produced bug B42: gateway targets were still deleting
+#: when ``delete_gateway`` fired, and runtimes were still ``DELETING`` when the
+#: roles they assume were removed.
+DELETION_TIERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # AgentCore plane first: runtimes and gateways are the things that hold
+    # references to everything else.
+    ("agentcore", ("agentcore-runtime", "agentcore-gateway", "agentcore-memory")),
+    # Then what those runtimes called and stored.
+    (
+        "compute-and-data",
+        (
+            "lambda-function",
+            "lambda-layer-version",
+            "dynamodb-table",
+            "ecr-repository",
+            "codebuild-project",
+        ),
+    ),
+    # IAM last of the AWS tiers: nothing may still be assuming these roles.
+    ("iam", ("iam-role",)),
+    # Local files are not AWS resources and cannot race.
+    ("local", ("local-config-file",)),
+)
 
 
 @dataclass
@@ -423,13 +470,9 @@ def discover_codebuild_projects(clients: Clients) -> Iterator[Candidate]:
 
 
 def discover_local_config(_clients: Clients) -> Iterator[Candidate]:
-    paths = [
-        path
-        for pattern in CONFIG_GLOBS
-        for path in glob.glob(os.path.expanduser(pattern))
-    ]
+    paths = [path for path in CONFIG_FILES if os.path.isfile(path)]
     if not paths:
-        yield Candidate("local-config-file", CONFIG_GLOBS[0], Selection.ABSENT)
+        yield Candidate("local-config-file", CONFIG_FILES[0], Selection.ABSENT)
         return
     for path in paths:
         yield Candidate(
@@ -464,6 +507,127 @@ def build_plan(clients: Clients) -> list[Candidate]:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# Absence probes — "is it actually gone yet?"
+#
+# Each probe returns None when the resource is gone, or a short human-readable
+# state string when it is still there. A state string is not a failure on its
+# own: ``DELETING`` simply means poll again. Only a state that survives the
+# timeout is a failure. Collapsing those two into one outcome is bug B42.
+# --------------------------------------------------------------------------
+
+#: Error codes every service uses to say "that does not exist".
+_GONE_CODES = (
+    "ResourceNotFoundException",
+    "RepositoryNotFoundException",
+    "NoSuchEntity",
+    "NoSuchEntityException",
+)
+
+
+def _probe_state(clients: Clients, candidate: Candidate) -> str | None:
+    """Return None if the resource is gone, else a description of its state."""
+    try:
+        match candidate.kind:
+            case "agentcore-memory":
+                memory = clients.agentcore.get_memory(memoryId=candidate.identifier)
+                return f"status={memory.get('memory', {}).get('status', 'UNKNOWN')}"
+            case "agentcore-runtime":
+                runtime = clients.agentcore.get_agent_runtime(
+                    agentRuntimeId=candidate.identifier
+                )
+                return f"status={runtime.get('status', 'UNKNOWN')}"
+            case "agentcore-gateway":
+                gateway = clients.agentcore.get_gateway(
+                    gatewayIdentifier=candidate.identifier
+                )
+                return f"status={gateway.get('status', 'UNKNOWN')}"
+            case "lambda-function":
+                clients.lambda_.get_function(FunctionName=candidate.name)
+                return "present"
+            case "lambda-layer-version":
+                clients.lambda_.get_layer_version(
+                    LayerName=candidate.name, VersionNumber=int(candidate.identifier)
+                )
+                return "present"
+            case "dynamodb-table":
+                table = clients.dynamodb.describe_table(TableName=candidate.name)
+                return f"status={table['Table'].get('TableStatus', 'UNKNOWN')}"
+            case "iam-role":
+                clients.iam.get_role(RoleName=candidate.name)
+                return "present"
+            case "ecr-repository":
+                clients.ecr.describe_repositories(repositoryNames=[candidate.name])
+                return "present"
+            case "codebuild-project":
+                # batch_get_projects reports absence in the payload, not by raising.
+                found = clients.codebuild.batch_get_projects(
+                    names=[candidate.name]
+                ).get("projects", [])
+                return "present" if found else None
+            case "local-config-file":
+                return "present" if Path(candidate.name).exists() else None
+            case unknown:
+                raise ValueError(f"no absence probe for kind {unknown!r}")
+    except ClientError as exc:
+        if _absent(exc, *_GONE_CODES):
+            return None
+        raise
+
+
+def wait_until_gone(
+    clients: Clients,
+    candidates: list[Candidate],
+    *,
+    timeout: float | None = None,
+    label: str = "",
+) -> list[Failure]:
+    """Poll until every candidate is absent. Report only what was observed.
+
+    Backs off from 2s to 15s. Returns a Failure per resource still standing when
+    the timeout expires, naming the resource and the state it was last seen in.
+    Returning an empty list means every resource was *observed* absent, which is
+    the whole point: the previous code reported success the moment the API
+    accepted the delete request.
+    """
+    # Read the module global at call time, not at def time, so tests can shorten it.
+    timeout = WAIT_TIMEOUT if timeout is None else timeout
+    failures: list[Failure] = []
+    for candidate in candidates:
+        target = candidate.identifier or candidate.name
+        deadline = time.monotonic() + timeout
+        delay = 2.0
+        state: str | None = "unknown"
+        while time.monotonic() < deadline:
+            try:
+                state = _probe_state(clients, candidate)
+            except (ClientError, BotoCoreError, ValueError) as exc:
+                failures.append(
+                    Failure(candidate.kind, candidate.name, f"probe failed: {exc}")
+                )
+                state = None  # stop polling; the failure is already recorded
+                break
+            if state is None:
+                print(f"  gone    {candidate.kind} {target}")
+                break
+            time.sleep(delay)
+            delay = min(delay * 1.5, 15.0)
+        else:
+            failures.append(
+                Failure(
+                    candidate.kind,
+                    candidate.name,
+                    f"still present after {timeout:.0f}s in tier {label!r} "
+                    f"({state}) — this is a real leak, not a race",
+                )
+            )
+            print(
+                f"  TIMEOUT {candidate.kind} {target} still present ({state})",
+                file=sys.stderr,
+            )
+    return failures
+
+
 def _delete_role(clients: Clients, role_name: str) -> None:
     attached = clients.iam.list_attached_role_policies(RoleName=role_name)
     for policy in attached.get("AttachedPolicies", []):
@@ -474,14 +638,52 @@ def _delete_role(clients: Clients, role_name: str) -> None:
     clients.iam.delete_role(RoleName=role_name)
 
 
+def _wait_gateway_targets_gone(
+    clients: Clients, gateway_id: str, target_ids: list[str], timeout: float
+) -> None:
+    """Block until every gateway target is absent.
+
+    ``delete_gateway`` fails while any target is still deleting. The old code
+    fired the two calls back to back and reported the resulting error as a
+    cleanup failure, which is half of bug B42.
+    """
+    deadline = time.monotonic() + timeout
+    delay = 2.0
+    remaining = list(target_ids)
+    while remaining and time.monotonic() < deadline:
+        still_there = []
+        for target_id in remaining:
+            try:
+                clients.agentcore.get_gateway_target(
+                    gatewayIdentifier=gateway_id, targetId=target_id
+                )
+            except ClientError as exc:
+                if _absent(exc, *_GONE_CODES):
+                    continue
+                raise
+            still_there.append(target_id)
+        remaining = still_there
+        if remaining:
+            time.sleep(delay)
+            delay = min(delay * 1.5, 15.0)
+    if remaining:
+        raise TimeoutError(
+            f"gateway targets {remaining} still present after {timeout:.0f}s; "
+            "refusing to call delete_gateway on a gateway that still has targets"
+        )
+
+
 def _delete_gateway(clients: Clients, gateway_id: str) -> None:
     targets = clients.agentcore.list_gateway_targets(
         gatewayIdentifier=gateway_id
     ).get("items", [])
-    for target in targets:
+    target_ids = [target["targetId"] for target in targets]
+    for target_id in target_ids:
         clients.agentcore.delete_gateway_target(
-            gatewayIdentifier=gateway_id, targetId=target["targetId"]
+            gatewayIdentifier=gateway_id, targetId=target_id
         )
+    # Observe the targets actually gone before touching the gateway.
+    _wait_gateway_targets_gone(clients, gateway_id, target_ids, WAIT_TIMEOUT)
     clients.agentcore.delete_gateway(gatewayIdentifier=gateway_id)
 
 
@@ -513,39 +715,65 @@ def _delete(clients: Clients, candidate: Candidate) -> None:
             raise ValueError(f"no delete handler for kind {unknown!r}")
 
 
+#: Error codes meaning "a delete is already in flight for this resource".
+#: These are not failures. The resource is on its way out, and the wait below is
+#: what decides whether it actually left. Reporting them as failures is the other
+#: half of bug B42: a re-run saw runtimes in ``DELETING`` and exited 1 on a race.
+_ALREADY_DELETING_CODES = ("ConflictException", "ResourceInUseException")
+
+
 def execute_plan(
     clients: Clients, plan: list[Candidate], *, dry_run: bool
 ) -> list[Failure]:
-    """Delete every selected candidate. Errors are collected, never swallowed."""
+    """Delete in dependency order, waiting for actual absence between tiers.
+
+    Errors are collected, never swallowed. A tier is not considered done until
+    every resource in it has been *observed* absent, so a later tier can never
+    race ahead of a resource that still depends on it.
+    """
     failures: list[Failure] = []
-    for candidate in plan:
-        if not candidate.will_delete:
-            continue
-        if dry_run:
-            continue
-        try:
-            _delete(clients, candidate)
-        except (ClientError, BotoCoreError, OSError, ValueError) as exc:
-            failures.append(Failure(candidate.kind, candidate.name, str(exc)))
-            print(f"  FAILED  {candidate.kind} {candidate.name}: {exc}", file=sys.stderr)
-        else:
-            print(f"  deleted {candidate.kind} {candidate.identifier or candidate.name}")
-    return failures
+    if dry_run:
+        return failures
 
+    selected = [c for c in plan if c.will_delete]
+    known_kinds = {kind for _, kinds in DELETION_TIERS for kind in kinds}
+    unhandled = {c.kind for c in selected} - known_kinds
+    if unhandled:
+        # Fail loudly rather than silently skipping a tier we forgot to list.
+        raise ValueError(f"kinds missing from DELETION_TIERS: {sorted(unhandled)}")
 
-def wait_for_tables_gone(clients: Clients, plan: list[Candidate], timeout: float = 300.0) -> None:
-    """Block until deleted tables are actually gone, so teardown is verifiable."""
-    names = [c.name for c in plan if c.kind == "dynamodb-table" and c.will_delete]
-    deadline = time.monotonic() + timeout
-    for name in names:
-        while time.monotonic() < deadline:
+    for label, kinds in DELETION_TIERS:
+        tier = [c for c in selected if c.kind in kinds]
+        if not tier:
+            continue
+        print(f"\n-- tier {label}: {len(tier)} resource(s)")
+        deleted: list[Candidate] = []
+        for candidate in tier:
+            target = candidate.identifier or candidate.name
             try:
-                clients.dynamodb.describe_table(TableName=name)
+                _delete(clients, candidate)
             except ClientError as exc:
-                if _absent(exc, "ResourceNotFoundException"):
-                    break
-                raise
-            time.sleep(5)
+                if _absent(exc, *_GONE_CODES):
+                    print(f"  gone    {candidate.kind} {target} (already absent)")
+                    continue
+                if _absent(exc, *_ALREADY_DELETING_CODES):
+                    print(f"  pending {candidate.kind} {target} (delete already in flight)")
+                    deleted.append(candidate)
+                    continue
+                failures.append(Failure(candidate.kind, candidate.name, str(exc)))
+                print(f"  FAILED  {candidate.kind} {candidate.name}: {exc}", file=sys.stderr)
+            except (BotoCoreError, OSError, ValueError) as exc:
+                failures.append(Failure(candidate.kind, candidate.name, str(exc)))
+                print(f"  FAILED  {candidate.kind} {candidate.name}: {exc}", file=sys.stderr)
+            else:
+                print(f"  delete requested: {candidate.kind} {target}")
+                deleted.append(candidate)
+
+        if deleted:
+            print(f"  waiting for tier {label} to be observed gone...")
+            failures.extend(wait_until_gone(clients, deleted, label=label))
+
+    return failures
 
 
 def print_plan(plan: list[Candidate], *, dry_run: bool) -> None:
@@ -571,7 +799,6 @@ def run(clients: Clients, *, dry_run: bool) -> int:
     if not dry_run:
         print("\nexecuting...")
         failures = execute_plan(clients, plan, dry_run=False)
-        wait_for_tables_gone(clients, plan)
 
     blocked = [c for c in plan if c.selection is Selection.UNTAGGED_BLOCKED]
     if blocked:

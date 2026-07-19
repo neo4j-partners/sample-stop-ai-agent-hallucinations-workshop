@@ -123,7 +123,7 @@ All demos default to Amazon Bedrock (Claude Sonnet 4) but work with any provider
 
 ## Common Issues and How to Fix Them
 
-**Bedrock access denied:** Ensure the model (`us.anthropic.claude-sonnet-4-5` or similar) is enabled in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess).
+**Bedrock access denied:** Ensure the model (`us.anthropic.claude-sonnet-5` or similar) is enabled in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess).
 
 **Neo4j connection fails (demo 01):** Verify `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` are set in your `.env` file and that APOC is enabled on your Aura instance.
 

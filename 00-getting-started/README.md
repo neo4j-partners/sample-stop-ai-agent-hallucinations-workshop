@@ -37,7 +37,7 @@ Get up and running with [Strands Agents](https://strandsagents.com) in under 30 
 aws configure   # or set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
 ```
 
-Then enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) (`us.anthropic.claude-sonnet-4-5` or equivalent).
+Then enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) (`us.anthropic.claude-sonnet-5` or equivalent).
 
 ---
 
