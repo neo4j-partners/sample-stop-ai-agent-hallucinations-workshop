@@ -4,8 +4,11 @@
 
 Usage::
 
-    python3 cleanup.py --dry-run   # show what would be deleted, and why
-    python3 cleanup.py             # delete it
+    python3 cleanup.py             # dry run: show what would be deleted, and why
+    python3 cleanup.py --yes       # actually delete
+
+The default is a dry run. Deletion requires the explicit ``--yes`` flag so a
+bare ``python3 cleanup.py`` never destroys resources by surprise.
 
 The deletion logic lives in ``08-cleanup/workshop_cleanup.py`` so there is
 exactly **one** teardown path to audit. This file used to carry its own copy,

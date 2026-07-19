@@ -5,9 +5,13 @@ Delete the resources created in Modules 6 and 7.
 ## How to Run
 
 ```bash
-python workshop_cleanup.py --dry-run   # read-only: show the plan and the reasoning
-python workshop_cleanup.py             # execute it
+python workshop_cleanup.py             # dry run by default: show the plan and the reasoning
+python workshop_cleanup.py --dry-run   # the same read-only run, made explicit
+python workshop_cleanup.py --yes       # execute it and delete the tagged resources
 ```
+
+The default is a dry run. Deletion happens only when you pass `--yes`, so running the script with no
+arguments never deletes anything.
 
 Or open `cleanup.ipynb`, which runs the same code and shows the dry run before it deletes anything.
 `../06-agentcore-boto3-demo/cleanup.py` is a thin wrapper around the same module, so there is exactly
@@ -91,7 +95,7 @@ Any delete that fails, and any untagged workshop resource found, produces a non-
 python -m unittest discover -s . -v
 ```
 
-12 tests, no AWS credentials needed — the clients are injected fakes. The headline test is
+18 tests, no AWS credentials needed. The clients are injected fakes. The headline test is
 `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape that
 bug B6 damaged and asserts none of those roles is selected.
 

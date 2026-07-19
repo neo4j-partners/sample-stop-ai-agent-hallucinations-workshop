@@ -16,14 +16,116 @@ Run with::
 from __future__ import annotations
 
 import ast
+import json
+import subprocess
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from botocore.exceptions import ClientError
 
 import workshop_cleanup as wc
+
+#: String methods that decide membership by name shape rather than identity.
+_PREFIX_MATCHERS = frozenset(
+    {"startswith", "endswith", "removeprefix", "removesuffix"}
+)
+
+
+def _is_delete_attr(attr: str) -> bool:
+    """True for method names that destroy the resource they name."""
+    return attr.startswith(("delete", "terminate")) or attr == "unlink"
+
+
+def _calls(node: ast.AST) -> list[ast.Call]:
+    return [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+
+
+def _contains_prefix_match(node: ast.AST) -> bool:
+    return any(
+        isinstance(call.func, ast.Attribute) and call.func.attr in _PREFIX_MATCHERS
+        for call in _calls(node)
+    )
+
+
+def _contains_delete(node: ast.AST) -> bool:
+    return any(
+        isinstance(call.func, ast.Attribute) and _is_delete_attr(call.func.attr)
+        for call in _calls(node)
+    )
+
+
+def _prefix_coupled_deletes(tree: ast.AST) -> bool:
+    """True if any delete call is guarded by a prefix/suffix match.
+
+    This is the exact shape of bug B6: a name-prefix test whose branch then
+    deletes. A lone ``startswith`` used for ordinary string handling is not
+    flagged, so the guard can safely sweep the whole repo.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            if _contains_prefix_match(node.test) and (
+                any(_contains_delete(stmt) for stmt in node.body)
+                or any(_contains_delete(stmt) for stmt in node.orelse)
+            ):
+                return True
+        elif isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            guarded = any(
+                _contains_prefix_match(cond)
+                for gen in node.generators
+                for cond in gen.ifs
+            )
+            if isinstance(node, ast.DictComp):
+                produced = [node.key, node.value]
+            else:
+                produced = [node.elt]
+            if guarded and any(_contains_delete(part) for part in produced):
+                return True
+    return False
+
+
+def _strip_ipython_magics(source: str) -> str:
+    """Replace line magics and shell escapes so a cell parses as plain Python."""
+    lines = []
+    for line in source.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("%", "!", "?")) or stripped.endswith("?"):
+            lines.append("pass")
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _repo_root() -> Path:
+    root = subprocess.check_output(
+        ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "--show-toplevel"],
+        text=True,
+    ).strip()
+    return Path(root)
+
+
+def _tracked(root: Path, pattern: str) -> list[str]:
+    output = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", pattern], text=True
+    )
+    return [line for line in output.splitlines() if line]
+
+
+def _tracked_sources(root: Path) -> Iterator[tuple[str, str]]:
+    """Yield (label, python-source) for every tracked .py and .ipynb code cell."""
+    for rel in _tracked(root, "*.py"):
+        yield rel, (root / rel).read_text(encoding="utf-8")
+    for rel in _tracked(root, "*.ipynb"):
+        notebook = json.loads((root / rel).read_text(encoding="utf-8"))
+        for index, cell in enumerate(notebook.get("cells", [])):
+            if cell.get("cell_type") != "code":
+                continue
+            source = _strip_ipython_magics("".join(cell.get("source", [])))
+            yield f"{rel} cell {index}", source
 
 _TMPDIR: tempfile.TemporaryDirectory[str] | None = None
 
@@ -78,6 +180,23 @@ class Recorder:
     @property
     def names(self) -> list[str]:
         return [name for name, _ in self.calls]
+
+
+class _SinglePagePaginator:
+    """Wrap a fake's ``list_*`` method as a one-page paginator.
+
+    The source now reads every ``list_*`` result through ``get_paginator``. The
+    fakes still expose the plain ``list_*`` methods, so a paginator that yields a
+    single page built from that method keeps their behaviour identical while
+    matching the real client's interface.
+    """
+
+    def __init__(self, client: Any, op: str) -> None:
+        self._client = client
+        self._op = op
+
+    def paginate(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return [getattr(self._client, self._op)(**kwargs)]
 
 
 class FakeIam:
@@ -140,6 +259,9 @@ class FakeAgentCore:
         self.tags_by_arn = tags_by_arn or {}
         self.delete_memory_error = delete_memory_error
 
+    def get_paginator(self, op: str) -> _SinglePagePaginator:
+        return _SinglePagePaginator(self, op)
+
     def list_memories(self) -> dict[str, Any]:
         return {"memories": self.memories}
 
@@ -147,6 +269,9 @@ class FakeAgentCore:
         return {"agentRuntimes": []}
 
     def list_gateways(self) -> dict[str, Any]:
+        return {"items": []}
+
+    def list_gateway_targets(self, **_kw: Any) -> dict[str, Any]:
         return {"items": []}
 
     def list_tags_for_resource(self, resourceArn: str) -> dict[str, Any]:
@@ -183,6 +308,9 @@ class FakeEmpty:
 
     def __init__(self, recorder: Recorder) -> None:
         self.rec = recorder
+
+    def get_paginator(self, op: str) -> _SinglePagePaginator:
+        return _SinglePagePaginator(self, op)
 
     def get_function(self, **_kw: Any) -> dict[str, Any]:
         raise not_found("ResourceNotFoundException")
@@ -303,6 +431,40 @@ class TestTagScoping(unittest.TestCase):
         source = (Path(__file__).parent / "workshop_cleanup.py").read_text()
         self.assertNotIn('PathPrefix="/"', source)
 
+    def test_no_tracked_file_couples_delete_with_prefix_match(self) -> None:
+        """Widened B6 guard (V7/V13): sweep the whole repo, not one file.
+
+        The narrow guard above pins the deletion module. This one walks every
+        tracked ``.py`` file and every code cell of every tracked ``.ipynb`` so
+        a prefix-scoped delete cannot slip back into a sibling module or a
+        notebook. It flags the dangerous coupling, a delete reachable inside a
+        branch chosen by ``startswith``/``endswith``, rather than any lone
+        string call, so ordinary string handling elsewhere is left alone.
+        """
+        root = _repo_root()
+        analyzed = 0
+        offenders: list[str] = []
+        for label, source in _tracked_sources(root):
+            try:
+                tree = ast.parse(source)
+            except SyntaxError:
+                continue
+            analyzed += 1
+            if _prefix_coupled_deletes(tree):
+                offenders.append(label)
+
+        self.assertGreater(
+            analyzed, 20, "expected to analyze the repo's tracked Python sources"
+        )
+        self.assertEqual(
+            offenders,
+            [],
+            msg=(
+                "these tracked sources delete a resource chosen by a name-prefix "
+                f"match, which is bug B6: {offenders}"
+            ),
+        )
+
 
 class TestMemory(unittest.TestCase):
     """B5 — Memory must be matched on ``id``; there is no ``memoryName``."""
@@ -367,6 +529,72 @@ class TestMemory(unittest.TestCase):
 
         exit_code = wc.run(clients, dry_run=False)
         self.assertEqual(exit_code, 1, "a failed delete must exit non-zero, not report success")
+
+
+class _MultiPagePaginator:
+    """Yield a fixed list of pages, ignoring the paginate() arguments."""
+
+    def __init__(self, pages: list[dict[str, Any]]) -> None:
+        self._pages = pages
+
+    def paginate(self, **_kwargs: Any) -> list[dict[str, Any]]:
+        return list(self._pages)
+
+
+class PaginatedAgentCore(FakeAgentCore):
+    """A fake whose ``list_memories`` result spans two pages.
+
+    Only the first page would be read by a caller that ignores ``nextToken``.
+    A workshop-tagged memory placed on the second page proves the discover
+    function walks every page.
+    """
+
+    def __init__(
+        self,
+        recorder: Recorder,
+        pages: list[dict[str, Any]],
+        tags_by_arn: dict[str, dict[str, str]],
+    ) -> None:
+        flattened = [m for page in pages for m in page.get("memories", [])]
+        super().__init__(recorder, memories=flattened, tags_by_arn=tags_by_arn)
+        self._pages = pages
+
+    def get_paginator(self, op: str) -> Any:
+        if op == "list_memories":
+            return _MultiPagePaginator(self._pages)
+        return super().get_paginator(op)
+
+
+class TestPagination(unittest.TestCase):
+    """B50/V6 — discovery must read every page, not just the first."""
+
+    def test_tagged_memory_on_second_page_is_discovered(self) -> None:
+        recorder = Recorder()
+        decoy = {
+            "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/orchestrator_agent_mem-Page1AA",
+            "id": "orchestrator_agent_mem-Page1AA",
+            "status": "ACTIVE",
+        }
+        target = {
+            "arn": "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/workshop_HotelBookingMemory-Page2BB",
+            "id": "workshop_HotelBookingMemory-Page2BB",
+            "status": "ACTIVE",
+        }
+        pages = [{"memories": [decoy]}, {"memories": [target]}]
+        agentcore = PaginatedAgentCore(recorder, pages, {target["arn"]: dict(TAG)})
+        clients = make_clients(recorder, agentcore=agentcore)
+
+        plan = wc.build_plan(clients)
+        tagged = [
+            c
+            for c in plan
+            if c.kind == "agentcore-memory" and c.selection is wc.Selection.TAGGED
+        ]
+        self.assertEqual(
+            [c.identifier for c in tagged],
+            [target["id"]],
+            "a workshop-tagged memory on page 2 must be found; reading only page 1 misses it",
+        )
 
 
 class TestAsyncDeletionWaits(unittest.TestCase):

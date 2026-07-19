@@ -22,7 +22,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 | Approach | Hallucination Risk | Retrieval Method | Best For |
 |---|---|---|---|
 | Standard RAG (vector) | High — returns similar content even when irrelevant | Cosine similarity | General Q&A |
-| Graph-RAG (Neo4j) | 73% lower — grounded in entity relationships | Graph traversal + Cypher | Structured domains (hotels, products, finance) |
+| Graph-RAG (Neo4j) | 73% lower per RAG-KG-IL, arXiv 2503.13514; grounded in entity relationships | Graph traversal + Cypher | Structured domains (hotels, products, finance) |
 
 > **Key insight:** Vector search always returns *something similar*, even when the answer doesn't exist in the database — causing fabrication. Graph-RAG returns only what's explicitly connected in the knowledge graph.
 
@@ -32,7 +32,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 
 | # | Demo | What It Solves | Key Result | Stack |
 |:-:|------|----------------|------------|-------|
-| 01 | [Graph-RAG vs RAG](./01-graphrag-demo/) | Fabricated statistics, incomplete retrieval, out-of-domain hallucination | 73% fewer hallucinations with knowledge graphs | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j&logoColor=white) ![FAISS](https://img.shields.io/badge/FAISS-blue?style=flat) |
+| 01 | [Graph-RAG vs RAG](./01-graphrag-demo/) | Fabricated statistics, incomplete retrieval, out-of-domain hallucination | 73% fewer hallucinations with knowledge graphs, per RAG-KG-IL, arXiv 2503.13514 | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j&logoColor=white) ![FAISS](https://img.shields.io/badge/FAISS-blue?style=flat) |
 | 02 | [Semantic Tool Selection](./02-semantic-tools-demo/) | Wrong tool picks, token waste at scale (29 tools) | 74% fewer tokens over 24 queries, accuracy unchanged within noise | ![FAISS](https://img.shields.io/badge/FAISS-blue?style=flat) ![Embeddings](https://img.shields.io/badge/Embeddings-teal?style=flat) |
 | 03 | [Multi-Agent Validation](./03-multiagent-demo/) | Undetected hallucinations, fabricated responses | Executor-Validator-Critic cross-check pipeline | ![Swarm](https://img.shields.io/badge/Swarm-green?style=flat) |
 | 04 | [Neurosymbolic Guardrails](./04-neurosymbolic-demo/) | Agents ignoring business rules in prompts | Symbolic rules enforced via lifecycle hooks | ![Hooks](https://img.shields.io/badge/Hooks-purple?style=flat) |

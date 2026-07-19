@@ -56,7 +56,7 @@ Two agents query the same 300 hotel FAQs with different approaches:
 
 - Python 3.9+
 - Neo4j Desktop with APOC plugin
-- OpenAI API key
+- AWS credentials with Amazon Bedrock access (us-east-1)
 
 ### 1. Install Dependencies
 
@@ -69,9 +69,6 @@ uv venv && uv pip install -r requirements.txt
 Create a `.env` file with your credentials:
 
 ```bash
-# OpenAI API Key (required)
-OPENAI_API_KEY=your_openai_api_key_here
-
 # Neo4j Configuration (required for Graph-RAG demo)
 NEO4J_URI=neo4j://127.0.0.1:7687
 NEO4J_USERNAME=neo4j
@@ -139,14 +136,14 @@ The demo creates **two agents** that query the same 300 hotel FAQs:
 rag_agent = Agent(
     name="RAG_Agent",
     tools=[search_faqs],  # FAISS similarity search
-    model=OpenAIModel("gpt-4o-mini")
+    model=BedrockModel(model_id="us.anthropic.claude-sonnet-5")
 )
 
 # Graph-RAG Agent - uses knowledge graph
 graph_agent = Agent(
     name="GraphRAG_Agent", 
     tools=[query_knowledge_graph],  # Cypher queries on Neo4j
-    model=OpenAIModel("gpt-4o-mini")
+    model=BedrockModel(model_id="us.anthropic.claude-sonnet-5")
 )
 ```
 
@@ -195,7 +192,7 @@ If you add new documents with new entity types (Restaurant, Airport, etc.), the 
 
 **Graph build slow:** Each document takes ~30s (LLM extraction). 300 docs ≈ 2.5 hours. Run once.
 
-**API errors:** Check has valid `OPENAI_API_KEY`
+**API errors:** Check that AWS credentials are configured and have Amazon Bedrock access in `us-east-1`
 
 **Model alternatives:** All demos work with OpenAI, Anthropic, or Ollama — see [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/)
 

@@ -23,8 +23,9 @@ Safety contract
 
 Usage::
 
-    python workshop_cleanup.py --dry-run    # print the plan, touch nothing
-    python workshop_cleanup.py              # execute the plan
+    python workshop_cleanup.py              # dry run by default: print the plan, touch nothing
+    python workshop_cleanup.py --dry-run    # same as above, made explicit
+    python workshop_cleanup.py --yes        # execute the plan and delete
 
 Background: an earlier version of this teardown deleted IAM roles by
 account-wide name prefix and destroyed five unrelated roles, two of them in a
@@ -245,7 +246,12 @@ def _absent(error: ClientError, *codes: str) -> bool:
 
 
 def discover_memories(clients: Clients) -> Iterator[Candidate]:
-    memories = clients.agentcore.list_memories().get("memories", [])
+    paginator = clients.agentcore.get_paginator("list_memories")
+    memories = [
+        memory
+        for page in paginator.paginate()
+        for memory in page.get("memories", [])
+    ]
     matches = [m for m in memories if memory_id_matches_name(m["id"], MEMORY_NAME)]
     if not matches:
         yield Candidate("agentcore-memory", MEMORY_NAME, Selection.ABSENT)
@@ -266,7 +272,12 @@ def discover_memories(clients: Clients) -> Iterator[Candidate]:
 
 
 def discover_runtimes(clients: Clients) -> Iterator[Candidate]:
-    runtimes = clients.agentcore.list_agent_runtimes().get("agentRuntimes", [])
+    paginator = clients.agentcore.get_paginator("list_agent_runtimes")
+    runtimes = [
+        runtime
+        for page in paginator.paginate()
+        for runtime in page.get("agentRuntimes", [])
+    ]
     by_name = {rt.get("agentRuntimeName"): rt for rt in runtimes}
     for name in RUNTIME_NAMES:
         runtime = by_name.get(name)
@@ -287,7 +298,12 @@ def discover_runtimes(clients: Clients) -> Iterator[Candidate]:
 
 
 def discover_gateways(clients: Clients) -> Iterator[Candidate]:
-    gateways = clients.agentcore.list_gateways().get("items", [])
+    paginator = clients.agentcore.get_paginator("list_gateways")
+    gateways = [
+        gateway
+        for page in paginator.paginate()
+        for gateway in page.get("items", [])
+    ]
     match = next((g for g in gateways if g.get("name") == GATEWAY_NAME), None)
     if match is None:
         yield Candidate("agentcore-gateway", GATEWAY_NAME, Selection.ABSENT)
@@ -327,9 +343,12 @@ def discover_lambda_functions(clients: Clients) -> Iterator[Candidate]:
 
 def discover_lambda_layers(clients: Clients) -> Iterator[Candidate]:
     try:
-        versions = clients.lambda_.list_layer_versions(
-            LayerName=LAMBDA_LAYER_NAME
-        ).get("LayerVersions", [])
+        paginator = clients.lambda_.get_paginator("list_layer_versions")
+        versions = [
+            version
+            for page in paginator.paginate(LayerName=LAMBDA_LAYER_NAME)
+            for version in page.get("LayerVersions", [])
+        ]
     except ClientError as exc:
         if _absent(exc, "ResourceNotFoundException"):
             versions = []
@@ -674,9 +693,12 @@ def _wait_gateway_targets_gone(
 
 
 def _delete_gateway(clients: Clients, gateway_id: str) -> None:
-    targets = clients.agentcore.list_gateway_targets(
-        gatewayIdentifier=gateway_id
-    ).get("items", [])
+    paginator = clients.agentcore.get_paginator("list_gateway_targets")
+    targets = [
+        target
+        for page in paginator.paginate(gatewayIdentifier=gateway_id)
+        for target in page.get("items", [])
+    ]
     target_ids = [target["targetId"] for target in targets]
     for target_id in target_ids:
         clients.agentcore.delete_gateway_target(
@@ -828,11 +850,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="print exactly what would be deleted and why, then exit without deleting",
+        help=(
+            "print exactly what would be deleted and why, then exit without "
+            "deleting; this is the default when neither flag is given"
+        ),
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "actually delete the tagged resources; without this flag the run is "
+            "a dry run and touches nothing"
+        ),
     )
     parser.add_argument("--region", default=REGION, help=f"AWS region (default {REGION})")
     args = parser.parse_args(argv)
-    return run(Clients.build(args.region), dry_run=args.dry_run)
+    # Default and --dry-run both mean dry run. Only --yes authorises deletion,
+    # and an explicit --dry-run always wins over --yes.
+    dry_run = args.dry_run or not args.yes
+    return run(Clients.build(args.region), dry_run=dry_run)
 
 
 if __name__ == "__main__":
