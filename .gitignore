@@ -89,3 +89,6 @@ faqs_docs_lite.json
 faqs_vector_lite.index
 # hotel-faqs.zip is tracked — needed for auto-extraction in the workshop notebooks
 !01-graphrag-demo/hotel-faqs.zip
+logs/
+verify-worklog.md
+*-executed.ipynb
