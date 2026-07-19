@@ -80,12 +80,21 @@ def build_pipeline(driver: Driver) -> SimpleKGPipeline:
     )
 
 
-def snapshot_node_ids(driver: Driver) -> set[str]:
-    """Return the element IDs of every node currently in the graph."""
+def snapshot_chunk_ids(driver: Driver) -> set[str]:
+    """Return the element IDs of every :Chunk currently in the graph.
+
+    The canary is scoped by chunk rather than by a diff over all nodes because
+    `perform_entity_resolution=True` merges a newly extracted entity into an
+    existing node when one already matches. Re-ingesting a document the graph
+    already holds therefore creates a `Chunk` but no new `Hotel`, and a
+    node-level diff reads that as "extraction produced no Hotel" when in fact
+    it produced one and deduplicated it. Chunks are never merged, so they are a
+    stable handle on "what this run just extracted".
+    """
     with driver.session() as session:
         return {
             record["id"]
-            for record in session.run("MATCH (n) RETURN elementId(n) AS id")
+            for record in session.run("MATCH (c:Chunk) RETURN elementId(c) AS id")
         }
 
 
@@ -116,26 +125,31 @@ async def ingest(pipeline: SimpleKGPipeline, paths: list[Path]) -> int:
     return errors
 
 
-def check_schema_held(driver: Driver, new_ids: set[str]) -> list[str]:
-    """Return a list of problems with the nodes whose IDs are in `new_ids`.
+def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
+    """Return a list of problems with what the canary chunks extracted.
+
+    Entities are reached by traversing `(:Chunk)<-[:FROM_CHUNK]-(entity)` from
+    the chunks this run created, so the check is correct whether the entity was
+    newly inserted or merged into an existing node by entity resolution.
 
     An empty list means extraction honoured the contract in
     `query_knowledge_graph`'s docstring.
     """
     problems: list[str] = []
+    ids = list(chunk_ids)
     with driver.session() as session:
         labels = {
             record["label"]: record["count"]
             for record in session.run(
                 """
-                MATCH (n)
-                WHERE elementId(n) IN $ids
+                MATCH (c:Chunk)<-[:FROM_CHUNK]-(n)
+                WHERE elementId(c) IN $ids
                 UNWIND labels(n) AS label
                 WITH label, count(*) AS count
                 WHERE NOT label STARTS WITH '__'
                 RETURN label, count
                 """,
-                ids=list(new_ids),
+                ids=ids,
             )
         }
         print(f"  labels produced: {labels}")
@@ -145,33 +159,34 @@ def check_schema_held(driver: Driver, new_ids: set[str]) -> list[str]:
             problems.append(f"off-schema labels present: {stray}")
 
         if not labels.get("Hotel"):
-            problems.append("no :Hotel node was created")
+            problems.append("no :Hotel node was extracted from the canary chunk")
+            return problems
 
         hotel = session.run(
             """
-            MATCH (h:Hotel)
-            WHERE elementId(h) IN $ids
+            MATCH (c:Chunk)<-[:FROM_CHUNK]-(h:Hotel)
+            WHERE elementId(c) IN $ids
             RETURN h.name AS name, h.address AS address,
-                   h.guest_rating AS guest_rating
+                   h.guest_rating AS guest_rating,
+                   elementId(h) AS id
             LIMIT 1
             """,
-            ids=list(new_ids),
+            ids=ids,
         ).single()
-        if hotel is not None:
-            print(f"  sample hotel: {dict(hotel)}")
-            for field in ("name", "address", "guest_rating"):
-                if hotel[field] is None:
-                    problems.append(f"Hotel.{field} was not extracted")
+        print(f"  sample hotel: {dict(hotel)}")
+        for field in ("name", "address", "guest_rating"):
+            if hotel[field] is None:
+                problems.append(f"Hotel.{field} was not extracted")
 
         linked = session.run(
             """
             MATCH (h:Hotel)-[r]->(n)
-            WHERE elementId(h) IN $ids
+            WHERE elementId(h) = $hotel_id
               AND type(r) IN ['HAS_ROOM', 'OFFERS_AMENITY',
                               'HAS_POLICY', 'PROVIDES_SERVICE']
             RETURN count(r) AS count
             """,
-            ids=list(new_ids),
+            hotel_id=hotel["id"],
         ).single()["count"]
         print(f"  contracted relationships from Hotel: {linked}")
         if linked == 0:
@@ -279,12 +294,15 @@ async def run_build(paths: list[Path], title: str) -> int:
     driver = connect()
     try:
         print(f"Canary: extracting {paths[0].name} before touching the graph...")
-        baseline = snapshot_node_ids(driver)
+        baseline = snapshot_chunk_ids(driver)
         pipeline = build_pipeline(driver)
         await ingest(pipeline, paths[:1])
 
-        new_ids = snapshot_node_ids(driver) - baseline
-        problems = check_schema_held(driver, new_ids)
+        new_chunks = snapshot_chunk_ids(driver) - baseline
+        if not new_chunks:
+            print("\n❌ Canary produced no :Chunk — extraction did not run.")
+            return 1
+        problems = check_schema_held(driver, new_chunks)
         if problems:
             print("\n❌ Canary failed — the existing graph was left untouched:")
             for problem in problems:

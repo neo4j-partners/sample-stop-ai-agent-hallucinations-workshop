@@ -150,6 +150,47 @@ def get_tool_output_log() -> str:
     return "\n".join(f"{i}. {line}" for i, line in enumerate(TOOL_LOG, 1))
 
 
+def spoken_text(agent: Any) -> str:
+    """Everything an agent said during one run, joined into one string.
+
+    Not `result.message`. In a swarm the executor's final message is the filler
+    it emits *after* calling handoff_to_agent, so reading that alone misses the
+    substantive answer entirely. A fresh agent per run means `agent.messages`
+    covers exactly that run.
+    """
+    parts: list[str] = []
+    for message in getattr(agent, "messages", []):
+        if message.get("role") != "assistant":
+            continue
+        for block in message.get("content") or []:
+            if isinstance(block, dict) and block.get("text"):
+                parts.append(block["text"])
+    return " ".join(parts).strip()
+
+
+def make_answer_reader(executor_agent: Any) -> Any:
+    """Build a read-only tool exposing the executor's answer to the validator.
+
+    Strands `Swarm` shares only the handoff message between nodes, not the text
+    a node actually produced. A validator given just the handoff message is
+    reviewing the executor's summary of its own answer, which is exactly the
+    thing that cannot be trusted: an executor that invented a figure has no
+    reason to mention it when handing off. Measured directly, that gap caused
+    the validator to pass a fabricated total.
+
+    This closes it with evidence rather than trust. Like `get_tool_output_log`,
+    the tool is read-only. It cannot book, cancel, or change anything.
+    """
+
+    @tool
+    def get_answer_under_review() -> str:
+        """Return the exact, full text the executor gave the guest."""
+        answer = spoken_text(executor_agent)
+        return answer or "The executor produced no text."
+
+    return get_answer_under_review
+
+
 @tool
 def record_verdict(verdict: str, unsupported_figures: list[str], reason: str) -> str:
     """Record the validation verdict. verdict must be 'VALID' or 'HALLUCINATION'.
