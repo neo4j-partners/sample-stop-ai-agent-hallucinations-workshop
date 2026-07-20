@@ -215,7 +215,7 @@ aws dynamodb update-item \
 | [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) | Runtime (agent hosting), Gateway (MCP semantic tool routing) |
 | [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) | Hotels catalog, bookings, and steering rules |
 | [AWS Lambda](https://aws.amazon.com/lambda/) | Serverless tool functions (search, book, validate, query graph) |
-| [Amazon Bedrock](https://aws.amazon.com/bedrock/) | LLM provider (Claude Sonnet 4 via Strands BedrockModel) |
+| [Amazon Bedrock](https://aws.amazon.com/bedrock/) | LLM provider (Claude Sonnet 5 via Strands BedrockModel) |
 | [bedrock-agentcore-starter-toolkit](https://pypi.org/project/bedrock-agentcore-starter-toolkit/) | Packages and deploys the agent container to AgentCore Runtime |
 | [Strands Agents](https://github.com/strands-agents/sdk-python) | Open-source agent framework (tool calling, lifecycle hooks) |
 | [Neo4j AuraDB Free](https://neo4j.com/cloud/aura-free/) | Managed graph database for knowledge graph (optional) |

@@ -149,16 +149,19 @@ graph_agent = Agent(
 
 ### How the Knowledge Graph is Built
 
-The graph is built **automatically** using `neo4j-graphrag` — no hardcoded schema:
+The graph is built automatically using `neo4j-graphrag` against the pinned
+schema in `graph_config.GRAPH_SCHEMA`. The schema keeps the graph aligned with
+the labels, properties, and relationships the agent is taught to query:
 
 ```python
 from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
+from graph_config import GRAPH_SCHEMA
 
-# No entities/relations defined — LLM discovers them from text
 kg_builder = SimpleKGPipeline(
     llm=llm,
     driver=neo4j_driver,
     embedder=embedder,
+    schema=GRAPH_SCHEMA,
     from_pdf=False,
     perform_entity_resolution=True,  # dedup similar entities
 )
@@ -168,11 +171,12 @@ await kg_builder.run_async(text=document_text)
 ```
 
 The LLM reads each document and:
-1. **Discovers entity types** (Hotel, Room, Amenity, Policy, Service)
-2. **Extracts relationships** (HAS_ROOM, OFFERS_AMENITY, HAS_POLICY)
+1. **Extracts schema-defined entities** (Hotel, Room, Amenity, Policy, Service)
+2. **Extracts schema-defined relationships** (HAS_ROOM, OFFERS_AMENITY, HAS_POLICY, PROVIDES_SERVICE)
 3. **Resolves duplicates** (merges similar entities into single nodes)
 
-If you add new documents with new entity types (Restaurant, Airport, etc.), the LLM discovers them automatically.
+If new documents require another entity type, update `GRAPH_SCHEMA` and the
+agent's query contract before rebuilding the graph.
 
 ## 📚 Technologies
 
@@ -208,7 +212,11 @@ Research ([RAG-KG-IL, 2025](https://arxiv.org/pdf/2503.13514)) shows knowledge g
 
 ### Do I need to define a schema for the knowledge graph?
 
-No. The graph is built automatically using `neo4j-graphrag`'s `SimpleKGPipeline`. The LLM reads each document and discovers entity types (Hotel, Room, Amenity, Policy), extracts relationships, and resolves duplicates — no hardcoded schema required. New entity types are discovered automatically when you add new documents.
+For this demo, no additional schema work is required because the repository
+already provides `graph_config.GRAPH_SCHEMA`. `SimpleKGPipeline` uses that
+contract while the LLM extracts entities and relationships and resolves
+duplicates. Adding a new entity type requires updating the pinned schema and
+the agent's query contract; it is not discovered automatically.
 
 ### How long does it take to build the knowledge graph?
 

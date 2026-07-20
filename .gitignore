@@ -28,6 +28,7 @@ graph-db/
 # Jupyter
 .ipynb_checkpoints/
 *_executed.ipynb
+setup/notebook-output/
 
 # IDE
 .idea/

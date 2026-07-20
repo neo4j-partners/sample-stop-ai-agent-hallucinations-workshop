@@ -61,7 +61,7 @@ Each demo builds on the previous one. You can run any demo independently, but th
 
 - Python 3.9+
 - [uv](https://docs.astral.sh/uv/) package manager
-- AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access (Claude Sonnet 4 enabled in your region)
+- AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access (Claude Sonnet 5 enabled in your region)
 
 ### Run Any Demo
 
@@ -75,6 +75,23 @@ uv run <main_script>.py
 ```
 
 Each demo README has specific setup instructions and prerequisites.
+
+### Run Notebooks as Tests
+
+The shared notebook runner uses `nbconvert` to execute source notebooks without
+modifying them. It creates its own cached environment through `uv`, writes
+executed notebooks to a temporary directory, and exits nonzero if a cell raises
+an error:
+
+```bash
+uv run setup/run_notebooks.py              # Labs 00-05
+uv run setup/run_notebooks.py --labs 4     # One lab
+uv run setup/run_notebooks.py --labs 2-5   # A range
+```
+
+Labs 06 and 07 deploy AWS resources and require `--include-deploy`. Lab 08
+deletes tagged workshop resources and requires `--include-cleanup`. See
+[`setup/README.md`](setup/README.md) for the complete command reference.
 
 ### Notebook Setup (nbstripout)
 
@@ -120,7 +137,7 @@ Yes. The patterns (Graph-RAG, semantic tool filtering, multi-agent validation, n
 
 ### Do I need an AWS account to run the demos?
 
-Yes. All demos use Amazon Bedrock (Claude Sonnet 4) as the default LLM provider. You need an AWS account with Bedrock access enabled in your region.
+Yes. All demos use Amazon Bedrock (Claude Sonnet 5) as the default LLM provider. You need an AWS account with Bedrock access enabled in your region.
 
 ### How long does it take to run each demo?
 
@@ -128,7 +145,7 @@ Demos 02-05 run in under 5 minutes. Demo 01 has a lite mode (30 docs, ~15 minute
 
 ### What LLM providers are supported?
 
-All demos default to Amazon Bedrock (Claude Sonnet 4) but work with any provider supported by Strands Agents: Anthropic API, OpenAI, Ollama (local models), or any OpenAI-compatible endpoint. See [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/) for configuration.
+All demos default to Amazon Bedrock (Claude Sonnet 5) but work with any provider supported by Strands Agents: Anthropic API, OpenAI, Ollama (local models), or any OpenAI-compatible endpoint. See [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/) for configuration.
 
 ---
 
