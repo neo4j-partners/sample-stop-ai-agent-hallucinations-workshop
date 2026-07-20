@@ -108,7 +108,7 @@ This demo uses the **server approach**. See the [Agent Control docs](https://doc
 >
 > `agent_control.init()` accepts a `controls_file=` argument and its docstring promises to "auto-discover and load local `controls.yaml` as fallback". The parameter is accepted and then ignored. The installed package contains no YAML loading code at all, so `init(controls_file=...)` silently loads nothing and leaves the guardrail layer inert.
 >
-> A `controls.yaml` ships here anyway. It is the source of truth for what `setup_controls.py` registers on the server, and `test_hooks_vs_control.py --local-controls` can load it directly into SDK state for local development. That flag is a workaround for the gap above, not a supported mode. It bypasses server-side policy resolution, and the controls in the file declare `execution: sdk` while `setup_controls.py` registers them as `execution: server`. **Results from `--local-controls` are not evidence that the server path works.**
+> A `controls.yaml` ships here anyway. It is the source of truth for what `setup_controls.py` registers on the server, and `demo_hooks_vs_control.py --local-controls` can load it directly into SDK state for local development. That flag is a workaround for the gap above, not a supported mode. It bypasses server-side policy resolution, and the controls in the file declare `execution: sdk` while `setup_controls.py` registers them as `execution: server`. **Results from `--local-controls` are not evidence that the server path works.**
 
 ---
 
@@ -159,7 +159,7 @@ uv run setup_controls.py
 ### 4. Run the comparison
 
 ```bash
-uv run test_hooks_vs_control.py
+uv run demo_hooks_vs_control.py
 ```
 
 Or open `test_hooks_vs_control.ipynb` in your IDE. VS Code, Kiro, and any other editor with notebook support all work.
@@ -192,7 +192,7 @@ Tool #1 .. Tool #17            # book_hotel called 17 times; the demo expects 2
 
 After nine injected steering messages the model concluded it was under a prompt-injection attack, said so in its output, refused to split the booking, and booked all 15 guests into a single room. That is the exact operation the control existed to prevent, so the guardrail failed open.
 
-`MAX_STEERS` in `test_hooks_vs_control.py` bounds the loop to one corrective nudge. The general lesson: **cap steer retries, and assert on your own state rather than on the model's wording.** A guardrail that nags indefinitely eventually gets ignored.
+`MAX_STEERS` in `demo_hooks_vs_control.py` bounds the loop to one corrective nudge. The general lesson: **cap steer retries, and assert on your own state rather than on the model's wording.** A guardrail that nags indefinitely eventually gets ignored.
 
 ---
 
@@ -234,7 +234,7 @@ Stop the Agent Control server following the [shutdown instructions](https://docs
 | `tools.py` | Booking tools, clean, with no validation logic |
 | `controls.yaml` | Control definitions, the source of truth for what `setup_controls.py` registers |
 | `setup_controls.py` | Creates the steer and deny controls on the Agent Control server |
-| `test_hooks_vs_control.py` | Runs both approaches on the same query and compares results |
+| `demo_hooks_vs_control.py` | Runs both approaches on the same query and compares results |
 | `test_hooks_vs_control.ipynb` | Interactive notebook version |
 | `requirements.txt` | Dependencies |
 

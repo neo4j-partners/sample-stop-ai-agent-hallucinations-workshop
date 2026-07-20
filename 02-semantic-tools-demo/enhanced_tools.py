@@ -45,7 +45,11 @@ def _neo4j_available() -> bool:
         driver = GraphDatabase.driver(
             NEO4J_URI,
             auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
-            connection_timeout=5,
+            connection_timeout=3,
+            # This probe runs at module import, so an unbounded acquisition here
+            # hangs notebook startup with no output. connection_timeout covers only
+            # the TCP connect; this ceiling also covers the TLS and Bolt handshakes (F15).
+            connection_acquisition_timeout=5,
         )
         try:
             driver.verify_connectivity()

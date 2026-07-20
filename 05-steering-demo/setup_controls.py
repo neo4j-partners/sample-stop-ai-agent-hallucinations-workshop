@@ -52,7 +52,7 @@ CONTROLS = [
             # This pattern therefore also matches the agent's own corrective reply
             # whenever that reply restates the original total, so the control cannot
             # be made self-excluding by narrowing the regex. The demo bounds steer
-            # retries instead — see MAX_STEERS in test_hooks_vs_control.py.
+            # retries instead — see MAX_STEERS in demo_hooks_vs_control.py.
             "evaluator": {
                 "name": "regex",
                 "config": {"pattern": r"(1[1-9]|[2-9]\d)\s*guest"},
@@ -158,7 +158,7 @@ async def setup():
 
         print(f"\nSetup complete — {len(control_ids)} controls attached to {AGENT_NAME}")
         print("\nRun the demo:")
-        print("  uv run test_hooks_vs_control.py")
+        print("  uv run demo_hooks_vs_control.py")
 
 
 if __name__ == "__main__":

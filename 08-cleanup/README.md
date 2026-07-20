@@ -65,9 +65,48 @@ would plausibly match, and the tag gate selects **zero** of them.
 ### Untagged resources are reported, not deleted
 
 If a resource exists under a workshop name but carries no workshop tag, cleanup refuses to delete it,
-prints it under `BLOCKED`, and exits 1. That is deliberate — the resource is either someone else's or
+prints it under `BLOCKED`, and exits 1. That is deliberate. The resource is either someone else's or
 came from a deployment that did not tag, and neither is a call a script should make for you. Tag it,
 or delete it by hand once you have confirmed it is yours.
+
+### An untagged workshop role blocks cleanup
+
+If an IAM role carries a workshop name (`workshop-LambdaExecutionRole` or
+`workshop-AgentCoreExecutionRole`) but no workshop tag, cleanup reports it under `BLOCKED` and exits 1
+without deleting it. This is the same safety rule above, applied to roles. It affects anyone who
+deployed Modules 6 or 7 before tagging landed (bug B20): those roles were created without the
+`WorkshopResource` tag, so the current teardown refuses to remove them.
+
+There are two ways to clear the block. Pick one.
+
+1. **Tag the role, then re-run.** Adopt the role by applying the workshop tag, after which cleanup
+   deletes it on the next run:
+
+```bash
+aws iam tag-role --role-name workshop-LambdaExecutionRole \
+  --tags Key=WorkshopResource,Value=stop-ai-agent-hallucinations
+python workshop_cleanup.py --yes
+```
+
+2. **Delete the role by hand in the console.** Open IAM in the AWS Console, confirm the role is yours
+   and came from this workshop, detach its policies, and delete it.
+
+Do either only for a role you have confirmed is yours. Tagging is a claim of ownership, and the next
+cleanup run acts on it.
+
+### Two residual deletion risks
+
+Two paths delete without a per-name tag check. Both are deliberate and test-pinned, and both are named
+here so you can recognize them:
+
+- **The Lambda layer `workshop-neo4j-driver` is deleted by exact name.** AWS does not allow tags on
+  Lambda layer versions, so this layer cannot be tag-gated and is matched by name alone. If you own an
+  unrelated layer with the same name, every version of it is deleted. Rename your layer, or run this
+  teardown in an account that holds no same-named layer.
+- **A tagged IAM role is deleted regardless of its name.** `discover_roles` selects every role in the
+  account carrying `WorkshopResource=stop-ai-agent-hallucinations`, whatever it is called. This is the
+  safe default of tag over name, but it means a role you tagged with the workshop key for any other
+  reason is also removed. Apply that tag only to resources you want this teardown to delete.
 
 ### The two documented exceptions
 

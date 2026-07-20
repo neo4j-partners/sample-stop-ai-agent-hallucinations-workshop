@@ -72,6 +72,8 @@ deployment_package.zip
 .bedrock_agentcore.yaml
 06-agentcore-boto3-demo/Dockerfile
 06-agentcore-boto3-demo/.dockerignore
+07-agentcore-memory-demo/Dockerfile
+07-agentcore-memory-demo/.dockerignore
 
 # Node (CDK)
 node_modules/

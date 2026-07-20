@@ -13,10 +13,14 @@ No OpenAI API key required — uses AWS credentials only.
 import asyncio
 import json
 import os
+from collections.abc import Sequence
+
 import boto3
 from botocore.config import Config
 from neo4j_graphrag.llm.base import LLMInterface, LLMResponse
 from neo4j_graphrag.embeddings.base import Embedder
+from neo4j_graphrag.message_history import MessageHistory
+from neo4j_graphrag.types import LLMMessage
 
 
 # botocore defaults to a 60s read timeout and 5 attempts, so one hung call can
@@ -41,10 +45,13 @@ def _strip_code_fence(text: str) -> str:
     if not stripped.startswith("```"):
         return text
 
+    # Only strip when the closing fence is also present. A truncated response
+    # carrying an opening fence but no closing one would otherwise drop its
+    # first line and hand back broken JSON.
     lines = stripped.splitlines()
-    if lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines[1:]).strip()
+    if len(lines) < 2 or lines[-1].strip() != "```":
+        return text
+    return "\n".join(lines[1:-1]).strip()
 
 
 def _converse_messages(message_history) -> list[dict]:
@@ -75,9 +82,13 @@ class BedrockEmbeddings(Embedder):
     def __init__(
         self,
         model_id: str = "amazon.nova-2-multimodal-embeddings-v1:0",
-        region_name: str = os.environ.get("AWS_REGION", "us-east-1"),
+        region_name: str | None = None,
         dimensions: int = 1024,
     ):
+        # Resolve the region inside the body: an os.environ default argument is
+        # evaluated once at import, before the caller can set AWS_REGION.
+        if region_name is None:
+            region_name = os.environ.get("AWS_REGION", "us-east-1")
         self.model_id = model_id
         self.dimensions = dimensions
         self.client = boto3.client(
@@ -108,10 +119,14 @@ class BedrockLLM(LLMInterface):
     def __init__(
         self,
         model_id: str = "us.anthropic.claude-sonnet-5",
-        region_name: str = os.environ.get("AWS_REGION", "us-east-1"),
+        region_name: str | None = None,
         temperature: float | None = None,
         max_tokens: int = 4096,
     ):
+        # Resolve the region inside the body: an os.environ default argument is
+        # evaluated once at import, before the caller can set AWS_REGION.
+        if region_name is None:
+            region_name = os.environ.get("AWS_REGION", "us-east-1")
         self.model_id = model_id
         self.client = boto3.client(
             "bedrock-runtime", region_name=region_name, config=BEDROCK_CONFIG
@@ -119,7 +134,9 @@ class BedrockLLM(LLMInterface):
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    def invoke(self, input: str, message_history=None, system_instruction=None) -> LLMResponse:
+    def invoke(self, input: str,
+               message_history: Sequence[LLMMessage] | MessageHistory | None = None,
+               system_instruction: str | None = None) -> LLMResponse:
         messages = _converse_messages(message_history) if message_history else []
         messages.append({"role": "user", "content": [{"text": input}]})
 

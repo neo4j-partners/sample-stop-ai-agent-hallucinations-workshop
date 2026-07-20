@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-#!/usr/bin/env python3
 """
 Multi-Agent Hallucination Detection Test
 Based on: https://arxiv.org/pdf/2510.19507 (Teaming LLMs to Detect and Mitigate Hallucinations)

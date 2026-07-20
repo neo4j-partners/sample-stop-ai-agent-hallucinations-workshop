@@ -17,13 +17,16 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from botocore.awsrequest import AWSResponse
 from botocore.exceptions import ClientError
 
 import workshop_cleanup as wc
@@ -608,13 +611,16 @@ class TestAsyncDeletionWaits(unittest.TestCase):
 
     def setUp(self) -> None:
         self._real_timeout = wc.WAIT_TIMEOUT
-        self._real_sleep = wc.time.sleep
         wc.WAIT_TIMEOUT = 1.0  # keep the suite fast
-        wc.time.sleep = lambda _seconds: None
+        # Patch sleep through the module under test and let unittest restore it,
+        # rather than rebinding time.sleep by hand (F6). addCleanup guarantees
+        # restoration even if a test raises.
+        sleep_patcher = patch("workshop_cleanup.time.sleep")
+        sleep_patcher.start()
+        self.addCleanup(sleep_patcher.stop)
 
     def tearDown(self) -> None:
         wc.WAIT_TIMEOUT = self._real_timeout
-        wc.time.sleep = self._real_sleep
 
     def _tagged_memory_clients(self, recorder: Recorder, agentcore: Any) -> wc.Clients:
         return make_clients(recorder, agentcore=agentcore)
@@ -741,6 +747,142 @@ class TestDryRun(unittest.TestCase):
 
         wc.execute_plan(clients, plan, dry_run=True)
         self.assertEqual(recorder.calls, [], "dry run must not call a single mutating API")
+
+
+class TestIamRetryConfig(unittest.TestCase):
+    """F8 — the IAM client must ride out throttling, not abort the whole plan.
+
+    ``discover_roles`` issues one ``list_role_tags`` per role in the account, so
+    a busy account throttles it. Without a retry config that ``ClientError``
+    escapes the discovery generator and kills ``build_plan`` before it prints
+    anything. The adaptive config makes botocore absorb the throttle internally.
+    """
+
+    _THROTTLE_BODY = (
+        b'<ErrorResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">'
+        b"<Error><Type>Sender</Type><Code>Throttling</Code>"
+        b"<Message>Rate exceeded</Message></Error>"
+        b"<RequestId>req</RequestId></ErrorResponse>"
+    )
+    _SUCCESS_BODY = (
+        b'<ListRolesResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">'
+        b"<ListRolesResult><IsTruncated>false</IsTruncated><Roles/>"
+        b"</ListRolesResult><ResponseMetadata><RequestId>ok</RequestId>"
+        b"</ResponseMetadata></ListRolesResponse>"
+    )
+
+    @staticmethod
+    def _http_response(status: int, body: bytes) -> AWSResponse:
+        response = AWSResponse("https://iam.amazonaws.com/", status, {}, None)
+        response._content = body
+        return response
+
+    def test_iam_client_absorbs_throttling(self) -> None:
+        # Dummy credentials so request signing succeeds; the HTTP layer is faked
+        # below, so nothing ever leaves the process.
+        env = {
+            "AWS_ACCESS_KEY_ID": "test",
+            "AWS_SECRET_ACCESS_KEY": "test",
+            "AWS_DEFAULT_REGION": "us-east-1",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            iam = wc.Clients.build("us-east-1").iam
+
+            # The config is the adaptive one F8 asks for, whose ceiling of 11
+            # total attempts sits well above botocore's legacy default of 5, so
+            # a burst of throttling is absorbed rather than escaping discovery.
+            self.assertEqual(iam.meta.config.retries["mode"], "adaptive")
+            self.assertEqual(iam.meta.config.retries["total_max_attempts"], 11)
+
+            # Return a throttling response first, then success. Without the retry
+            # config this call raises ThrottlingException instead of retrying.
+            # Sleep is left real (one short adaptive backoff): faking it makes
+            # adaptive mode's client-side rate limiter spin on the real clock,
+            # which is slower than letting the single backoff elapse.
+            sends = {"count": 0}
+
+            def fake_send(_self: Any, _request: Any) -> AWSResponse:
+                sends["count"] += 1
+                if sends["count"] == 1:
+                    return self._http_response(400, self._THROTTLE_BODY)
+                return self._http_response(200, self._SUCCESS_BODY)
+
+            with patch("botocore.httpsession.URLLib3Session.send", fake_send):
+                result = iam.list_roles()
+
+        self.assertEqual(result["Roles"], [])
+        self.assertEqual(
+            sends["count"],
+            2,
+            "the client should retry past the throttle and then succeed",
+        )
+
+
+class FakeBusyDynamo:
+    """A DynamoDB table stuck in ``CREATING``: ``delete_table`` always rejects.
+
+    ``delete_table`` on a table that is still being created raises
+    ``ResourceInUseException`` — the table is fully present and the delete did
+    not happen (F10).
+    """
+
+    def __init__(
+        self, recorder: Recorder, table_name: str, tags: dict[str, str]
+    ) -> None:
+        self.rec = recorder
+        self.table_name = table_name
+        self.tags = tags
+        self.arn = f"arn:aws:dynamodb:us-east-1:123456789012:table/{table_name}"
+
+    def describe_table(self, TableName: str) -> dict[str, Any]:
+        if TableName != self.table_name:
+            raise not_found("ResourceNotFoundException")
+        return {"Table": {"TableArn": self.arn, "TableStatus": "CREATING"}}
+
+    def list_tags_of_resource(self, ResourceArn: str) -> dict[str, Any]:
+        return {"Tags": [{"Key": k, "Value": v} for k, v in self.tags.items()]}
+
+    def delete_table(self, TableName: str) -> None:
+        self.rec.record("delete_table", TableName=TableName)
+        raise not_found("ResourceInUseException")
+
+
+class TestResourceInUseRetry(unittest.TestCase):
+    """F10 — ResourceInUseException means the delete did not happen; retry it.
+
+    The old code classified it as an in-flight delete, added the table to
+    ``deleted``, and polled it for the full timeout. The table was never on its
+    way out, so that timed out on a resource that is still fully present.
+    """
+
+    def test_resource_in_use_is_retried_and_never_reported_deleted(self) -> None:
+        recorder = Recorder()
+        clients = make_clients(recorder)
+        clients.dynamodb = FakeBusyDynamo(recorder, wc.HOTELS_TABLE, dict(TAG))
+
+        plan = wc.build_plan(clients)
+        selected = [c for c in plan if c.will_delete]
+        self.assertEqual(
+            [c.name for c in selected],
+            [wc.HOTELS_TABLE],
+            "the tagged CREATING table should be selected for deletion",
+        )
+
+        with patch("workshop_cleanup.time.sleep"):
+            failures = wc.execute_plan(clients, plan, dry_run=False)
+
+        # The delete was retried, not abandoned after the first rejection.
+        delete_calls = [name for name in recorder.names if name == "delete_table"]
+        self.assertEqual(len(delete_calls), wc._DELETE_MAX_ATTEMPTS)
+
+        # And the busy table is a genuine ResourceInUseException failure — never
+        # misreported as an in-flight delete that gets polled to absence. That
+        # path would surface a "still present ... deadline expired" failure after
+        # a single delete call, so this pins the corrected classification.
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].kind, "dynamodb-table")
+        self.assertEqual(failures[0].name, wc.HOTELS_TABLE)
+        self.assertIn("ResourceInUseException", failures[0].error)
 
 
 if __name__ == "__main__":

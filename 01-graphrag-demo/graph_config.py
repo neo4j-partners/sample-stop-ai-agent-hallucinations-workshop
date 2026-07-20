@@ -11,9 +11,11 @@ must agree on:
    `Address` nodes and another yields `RoomType`/`BedConfiguration`. The
    notebook's `query_knowledge_graph` docstring promises a fixed contract to the
    agent, and the graph has to actually honour it.
-2. **Neo4j connection settings**, read from `NEO4J_USERNAME`. The older
-   `NEO4J_USER` spelling is not what Aura provisions, and its `"neo4j"` default
-   silently sent a bad credential rather than failing loudly.
+2. **Neo4j connection settings**. `NEO4J_USERNAME` defaults to `"neo4j"`, which
+   is what Aura provisions; the older `NEO4J_USER` spelling is not read. There is
+   no default for `NEO4J_PASSWORD` — it is required, and a missing value raises at
+   import rather than silently sending a bad credential the way a baked-in default
+   password would.
 3. The **lite document sample**, stratified by city so the lite path exercises
    the same notebook questions (Paris, Cairo) as the full path.
 """
@@ -28,7 +30,14 @@ from pathlib import Path
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+if not NEO4J_PASSWORD:
+    raise RuntimeError(
+        "NEO4J_PASSWORD is not set. Export it (see .env.example) before running "
+        "the Graph-RAG demo; there is no default, so a missing password fails "
+        "loudly here instead of silently sending a bad credential to Neo4j."
+    )
 
 
 def neo4j_auth() -> tuple[str, str]:
@@ -188,7 +197,7 @@ REQUIRED_CITIES = ("paris", "cairo")
 def _city_of(filename: str) -> str:
     """Extract the city from a `hotel-<city>-<nnn>.txt` filename."""
     parts = Path(filename).stem.split("-")
-    return parts[1] if len(parts) > 2 else Path(filename).stem
+    return "-".join(parts[1:-1]) if len(parts) > 2 else Path(filename).stem
 
 
 def select_lite_files(data_dir: str | Path, max_docs: int) -> list[str]:

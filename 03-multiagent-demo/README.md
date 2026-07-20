@@ -83,7 +83,7 @@ uv run test_oracle.py
 
 # Full comparison: 4 scenarios x 3 repetitions x 2 architectures.
 # Roughly 208k tokens and 15 to 20 minutes.
-uv run test_multiagent_hallucinations.py
+uv run demo_multiagent_hallucinations.py
 ```
 
 Set `DEMO_REPETITIONS=1` for a fast, much noisier probe.
@@ -237,7 +237,7 @@ result = swarm("What is the total charge for booking BK900?")
 | `tools.py` | Booking tools and the simulated database, including the partner property and seeded booking `BK900` that form the hallucination surface |
 | `oracle.py` | The deterministic scorer, the verdict ledger, the read-only evidence tools, and token accounting |
 | `test_oracle.py` | Unit tests for the scorer against fixed strings. No model calls |
-| `test_multiagent_hallucinations.py` | The comparison harness, scorecard, and stability gate |
+| `demo_multiagent_hallucinations.py` | The comparison harness, scorecard, and stability gate |
 | `test_multiagent_hallucinations.ipynb` | The same scenarios at 2 repetitions, importing from the script |
 
 ### Two things worth copying into your own code

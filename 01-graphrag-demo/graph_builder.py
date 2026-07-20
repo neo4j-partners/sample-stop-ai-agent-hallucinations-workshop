@@ -41,6 +41,8 @@ from graph_config import (
     neo4j_auth,
 )
 
+# Must sit above the worst case of the Bedrock retry chain (see F16 /
+# bedrock_providers.BEDROCK_CONFIG): 3 attempts x 45s + backoff = ~135s < 180s.
 DOC_TIMEOUT_SECONDS = 180
 
 # The canary samples several documents rather than one. LLM extraction is
@@ -196,9 +198,10 @@ def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
                 for field in ("name", "address", "guest_rating")
                 if hotel[field] is None
             ]
-            if not missing and hotel["relationships"] > 0:
+            is_conforming = not missing and hotel["relationships"] > 0
+            if is_conforming:
                 conforming.append(hotel)
-            status = "ok" if not missing and hotel["relationships"] else "INCOMPLETE"
+            status = "ok" if is_conforming else "INCOMPLETE"
             print(
                 f"  hotel: {hotel['name']!r} rating={hotel['guest_rating']} "
                 f"rels={hotel['relationships']} [{status}]"
@@ -266,12 +269,12 @@ def report(driver: Driver) -> None:
         record = session.run(
             """
             MATCH (h:Hotel)
-            WHERE h.address CONTAINS 'Paris'
+            WHERE toLower(h.address) CONTAINS 'paris'
             RETURN avg(h.guest_rating) AS avg_rating, count(h) AS hotels
             """
         ).single()
         print(
-            f"  Test 1  avg guest rating in Paris: {record['avg_rating']} "
+            f"  Aggregation  avg guest rating in Paris: {record['avg_rating']} "
             f"across {record['hotels']} hotels"
         )
 
@@ -282,9 +285,9 @@ def report(driver: Driver) -> None:
             RETURN count(DISTINCT h) AS hotels
             """
         ).single()
-        print(f"  Test 2  hotels with a pool: {record['hotels']}")
+        print(f"  Counting  hotels with a pool: {record['hotels']}")
 
-        print("  Test 5  Cairo hotels with spa AND pool:")
+        print("  Multi-hop  Cairo hotels with spa AND pool:")
         rows = session.run(
             """
             MATCH (h:Hotel)-[:OFFERS_AMENITY]->(spa:Amenity),
@@ -326,12 +329,14 @@ async def run_build(paths: list[Path], title: str) -> int:
         new_chunks = snapshot_chunk_ids(driver) - baseline
         if not new_chunks:
             print("\n❌ Canary produced no :Chunk — extraction did not run.")
+            clear_demo_graph(driver)  # leave a clean, empty graph on failure
             return 1
         problems = check_schema_held(driver, new_chunks)
         if problems:
             print("\n❌ Canary failed. The graph was cleared; fix and re-run:")
             for problem in problems:
                 print(f"  - {problem}")
+            clear_demo_graph(driver)  # remove the canary's partial docs
             return 1
         print("✅ Canary passed: extraction matches the documented schema\n")
 

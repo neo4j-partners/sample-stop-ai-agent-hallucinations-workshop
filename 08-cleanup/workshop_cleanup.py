@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 WORKSHOP_TAG_KEY = "WorkshopResource"
@@ -231,7 +232,17 @@ class Clients:
     def build(cls, region: str = REGION) -> Clients:
         return cls(
             dynamodb=boto3.client("dynamodb", region_name=region),
-            iam=boto3.client("iam"),
+            # Adaptive retries absorb the IAM throttling that ``discover_roles``
+            # can provoke: it calls ``list_role_tags`` once per role in the
+            # account (see F8). Known limitation for large accounts: this stays
+            # O(roles) API calls. The scalable fix is to migrate discovery onto
+            # ``resourcegroupstaggingapi.get_resources(TagFilters=...)``, which
+            # returns tagged resources in one paginated call; it is intentionally
+            # not done here because workshop attendees run in sandbox accounts.
+            iam=boto3.client(
+                "iam",
+                config=Config(retries={"max_attempts": 10, "mode": "adaptive"}),
+            ),
             lambda_=boto3.client("lambda", region_name=region),
             agentcore=boto3.client("bedrock-agentcore-control", region_name=region),
             ecr=boto3.client("ecr", region_name=region),
@@ -240,7 +251,7 @@ class Clients:
         )
 
 
-def _absent(error: ClientError, *codes: str) -> bool:
+def _error_code_in(error: ClientError, *codes: str) -> bool:
     return error.response.get("Error", {}).get("Code") in codes
 
 
@@ -331,7 +342,7 @@ def discover_lambda_functions(clients: Clients) -> Iterator[Candidate]:
         try:
             response = clients.lambda_.get_function(FunctionName=name)
         except ClientError as exc:
-            if _absent(exc, "ResourceNotFoundException"):
+            if _error_code_in(exc, "ResourceNotFoundException"):
                 yield Candidate("lambda-function", name, Selection.ABSENT)
                 continue
             raise
@@ -354,7 +365,7 @@ def discover_lambda_layers(clients: Clients) -> Iterator[Candidate]:
             for version in page.get("LayerVersions", [])
         ]
     except ClientError as exc:
-        if _absent(exc, "ResourceNotFoundException"):
+        if _error_code_in(exc, "ResourceNotFoundException"):
             versions = []
         else:
             raise
@@ -376,7 +387,7 @@ def discover_tables(clients: Clients) -> Iterator[Candidate]:
         try:
             arn = clients.dynamodb.describe_table(TableName=name)["Table"]["TableArn"]
         except ClientError as exc:
-            if _absent(exc, "ResourceNotFoundException"):
+            if _error_code_in(exc, "ResourceNotFoundException"):
                 yield Candidate("dynamodb-table", name, Selection.ABSENT)
                 continue
             raise
@@ -430,7 +441,7 @@ def discover_roles(clients: Clients) -> Iterator[Candidate]:
         try:
             clients.iam.get_role(RoleName=role_name)
         except ClientError as exc:
-            if _absent(exc, "NoSuchEntity", "NoSuchEntityException"):
+            if _error_code_in(exc, "NoSuchEntity", "NoSuchEntityException"):
                 yield Candidate("iam-role", role_name, Selection.ABSENT)
                 continue
             raise
@@ -447,7 +458,7 @@ def discover_ecr_repos(clients: Clients) -> Iterator[Candidate]:
         try:
             repo = clients.ecr.describe_repositories(repositoryNames=[name])["repositories"][0]
         except ClientError as exc:
-            if _absent(exc, "RepositoryNotFoundException"):
+            if _error_code_in(exc, "RepositoryNotFoundException"):
                 yield Candidate("ecr-repository", name, Selection.ABSENT)
                 continue
             raise
@@ -493,17 +504,20 @@ def discover_codebuild_projects(clients: Clients) -> Iterator[Candidate]:
 
 
 def discover_local_config(_clients: Clients) -> Iterator[Candidate]:
-    paths = [path for path in CONFIG_FILES if os.path.isfile(path)]
-    if not paths:
-        yield Candidate("local-config-file", CONFIG_FILES[0], Selection.ABSENT)
-        return
-    for path in paths:
-        yield Candidate(
-            kind="local-config-file",
-            name=path,
-            selection=Selection.UNTAGGABLE_EXACT_NAME,
-            detail="local file at a fixed repo-relative path, not an AWS resource",
-        )
+    # Report each config path independently: an absent one is reported ABSENT by
+    # its own name, so a missing 07 file is not hidden behind a present 06 file
+    # (or vice versa). The old code reported only CONFIG_FILES[0] when none
+    # existed, naming the wrong path for the 07-only case.
+    for path in CONFIG_FILES:
+        if os.path.isfile(path):
+            yield Candidate(
+                kind="local-config-file",
+                name=path,
+                selection=Selection.UNTAGGABLE_EXACT_NAME,
+                detail="local file at a fixed repo-relative path, not an AWS resource",
+            )
+        else:
+            yield Candidate("local-config-file", path, Selection.ABSENT)
 
 
 DISCOVERERS = (
@@ -593,7 +607,7 @@ def _probe_state(clients: Clients, candidate: Candidate) -> str | None:
             case unknown:
                 raise ValueError(f"no absence probe for kind {unknown!r}")
     except ClientError as exc:
-        if _absent(exc, *_GONE_CODES):
+        if _error_code_in(exc, *_GONE_CODES):
             return None
         raise
 
@@ -615,10 +629,13 @@ def wait_until_gone(
     """
     # Read the module global at call time, not at def time, so tests can shorten it.
     timeout = WAIT_TIMEOUT if timeout is None else timeout
+    # One shared deadline for the whole tier (F5). Candidates within a tier are
+    # independent by construction, so a per-candidate deadline let a genuinely
+    # stuck tier take len(candidates) x timeout to fail instead of one timeout.
+    deadline = time.monotonic() + timeout
     failures: list[Failure] = []
     for candidate in candidates:
         target = candidate.identifier or candidate.name
-        deadline = time.monotonic() + timeout
         delay = 2.0
         state: str | None = "unknown"
         while time.monotonic() < deadline:
@@ -640,8 +657,8 @@ def wait_until_gone(
                 Failure(
                     candidate.kind,
                     candidate.name,
-                    f"still present after {timeout:.0f}s in tier {label!r} "
-                    f"({state}) — this is a real leak, not a race",
+                    f"still present when tier {label!r} deadline expired "
+                    f"({timeout:.0f}s, {state}) — this is a real leak, not a race",
                 )
             )
             print(
@@ -681,7 +698,7 @@ def _wait_gateway_targets_gone(
                     gatewayIdentifier=gateway_id, targetId=target_id
                 )
             except ClientError as exc:
-                if _absent(exc, *_GONE_CODES):
+                if _error_code_in(exc, *_GONE_CODES):
                     continue
                 raise
             still_there.append(target_id)
@@ -745,7 +762,45 @@ def _delete(clients: Clients, candidate: Candidate) -> None:
 #: These are not failures. The resource is on its way out, and the wait below is
 #: what decides whether it actually left. Reporting them as failures is the other
 #: half of bug B42: a re-run saw runtimes in ``DELETING`` and exited 1 on a race.
-_ALREADY_DELETING_CODES = ("ConflictException", "ResourceInUseException")
+_ALREADY_DELETING_CODES = ("ConflictException",)
+
+#: Error codes meaning "the resource is busy, so the delete did NOT happen".
+#: DynamoDB raises ``ResourceInUseException`` from ``delete_table`` on a table
+#: still in ``CREATING`` state: the table is fully present and the request was
+#: rejected. This is the opposite of an in-flight delete, so treating it as one
+#: (adding it to ``deleted`` and polling for absence) waits out the whole timeout
+#: on a resource that was never asked to leave. The right response is to wait for
+#: the resource to settle and retry the delete. See F10.
+_RETRYABLE_DELETE_CODES = ("ResourceInUseException",)
+
+#: How many times to attempt a delete that keeps failing with a busy code, and
+#: how long to wait between attempts.
+_DELETE_MAX_ATTEMPTS = 5
+_DELETE_RETRY_DELAY = 5.0
+
+
+def _delete_with_busy_retry(clients: Clients, candidate: Candidate) -> None:
+    """Delete a candidate, retrying while it reports itself busy.
+
+    Retries only on :data:`_RETRYABLE_DELETE_CODES`, where the resource is still
+    present and the delete did not happen (F10). Every other error, and a busy
+    state that outlives the attempts, is raised for the caller to classify.
+    """
+    for attempt in range(1, _DELETE_MAX_ATTEMPTS + 1):
+        try:
+            _delete(clients, candidate)
+            return
+        except ClientError as exc:
+            if not _error_code_in(exc, *_RETRYABLE_DELETE_CODES):
+                raise
+            if attempt == _DELETE_MAX_ATTEMPTS:
+                raise
+            target = candidate.identifier or candidate.name
+            print(
+                f"  busy    {candidate.kind} {target} not ready to delete "
+                f"(attempt {attempt}/{_DELETE_MAX_ATTEMPTS}); retrying"
+            )
+            time.sleep(_DELETE_RETRY_DELAY)
 
 
 def execute_plan(
@@ -777,12 +832,12 @@ def execute_plan(
         for candidate in tier:
             target = candidate.identifier or candidate.name
             try:
-                _delete(clients, candidate)
+                _delete_with_busy_retry(clients, candidate)
             except ClientError as exc:
-                if _absent(exc, *_GONE_CODES):
+                if _error_code_in(exc, *_GONE_CODES):
                     print(f"  gone    {candidate.kind} {target} (already absent)")
                     continue
-                if _absent(exc, *_ALREADY_DELETING_CODES):
+                if _error_code_in(exc, *_ALREADY_DELETING_CODES):
                     print(f"  pending {candidate.kind} {target} (delete already in flight)")
                     deleted.append(candidate)
                     continue
