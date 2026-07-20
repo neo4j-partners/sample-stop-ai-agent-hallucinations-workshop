@@ -100,3 +100,4 @@ verify-worklog.md
 # Internal review + scratch harness (untracked, do not ship)
 verify-v2.md
 *-fix07-infra.ipynb
+neo4j-ftw.md
