@@ -18,13 +18,12 @@ production hallucination. It does NOT instruct any model to invent, estimate,
 or guess a figure. Fabrication rates measured here are therefore rates under
 that pressure, not rates for an unprompted model.
 
-Fabrication is rare and stochastic. Measured over three full runs against
-us.anthropic.claude-sonnet-5, the single agent fabricated on 1 of 36 runs and
-the swarm executor on 4 of 36. Any individual run may show zero on both. That
-is a finding about the model, not a broken demo, and this script does not fail
-when it happens. What the stability gate does enforce is the part that must
-hold: every fabrication that occurs gets caught, and clean answers do not get
-flagged.
+Fabrication is rare and stochastic. Any individual run may show zero on both
+architectures. That is a finding about the model, not a broken demo, and this
+script does not fail when it happens. What the stability gate does enforce is
+the part that must hold: every fabrication that occurs gets caught, and clean
+answers do not get flagged. The three-run aggregate counts live once in the
+"Measured results" table in README.md, so they are not restated here.
 
 Scoring is deterministic. Whether a fabrication occurred is decided by
 `oracle.unsupported_figures` in Python. Verdicts are read from the
@@ -319,9 +318,9 @@ def main() -> int:
     print("never instructs a model to invent a figure. Rates below are rates under")
     print("that pressure, not rates for an unprompted model.")
     print()
-    print("Fabrication is rare and stochastic. Over three reference runs the single")
-    print("agent fabricated on 1 of 36 runs and the swarm executor on 4 of 36. This")
-    print("run may well show zero on both. That is an expected outcome.")
+    print("Fabrication is rare and stochastic. This run may well show zero on both")
+    print("architectures; that is an expected outcome. The three-run aggregate counts")
+    print("are in the Measured results table in README.md.")
 
     single_runs: list[dict] = []
     swarm_runs: list[dict] = []

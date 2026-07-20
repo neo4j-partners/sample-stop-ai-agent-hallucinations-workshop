@@ -6,7 +6,7 @@
 [![Strands Agents](https://img.shields.io/badge/Strands_Agents-1.27+-00B4D8.svg?style=flat)](https://strandsagents.com)
 [![Swarm](https://img.shields.io/badge/Pattern-Executor→Validator→Critic-green.svg?style=flat)](https://strandsagents.com/docs/user-guide/concepts/multi-agent/swarm/)
 
-> An **Executor → Validator → Critic** swarm catches figures the executor invented before they reach the guest. Measured over three full runs against `us.anthropic.claude-sonnet-5`: the validator caught every fabrication its executor produced, 4 of 4, and wrongly flagged 0 of 32 clean answers. Fabrication itself was rare. The single agent invented a figure on 1 of 36 runs and the swarm executor on 4 of 36. The swarm costs about 7 times the tokens. This demo is about deciding whether that trade is worth making.
+> An **Executor → Validator → Critic** swarm catches figures the executor invented before they reach the guest. Measured over three full runs against `us.anthropic.claude-sonnet-5`, the validator caught every fabrication its executor produced and wrongly flagged no clean answers, while fabrication itself was rare and the swarm cost several times the tokens. The exact counts live once in [Measured results](#measured-results) below, so they cannot drift. This demo is about deciding whether that trade is worth making.
 
 Based on research: [Teaming LLMs to Detect and Mitigate Hallucinations](https://arxiv.org/pdf/2510.19507)
 
@@ -291,7 +291,7 @@ The validator records `verdict="HALLUCINATION"` with the specific unsupported fi
 
 ### Does multi-agent validation increase latency and cost?
 
-Yes, substantially. Three agents and several handoffs cost about 7 times the tokens of a single agent for the same four scenarios, 183.5k against 24.7k, plus the wall-clock time of the extra model calls.
+Yes, substantially. Three agents and several handoffs cost several times the tokens of a single agent for the same four scenarios, plus the wall-clock time of the extra model calls. The measured token counts are in [Measured results](#measured-results).
 
 ### Is this pattern specific to Strands?
 
