@@ -43,12 +43,16 @@ from neo4j_graphrag.llm.base import LLMResponse  # noqa: E402
 from neo4j_graphrag.message_history import InMemoryMessageHistory  # noqa: E402
 from neo4j_graphrag.types import LLMMessage  # noqa: E402
 
-from graph_builder import DOC_TIMEOUT_SECONDS  # noqa: E402
 from bedrock_providers import (  # noqa: E402
     BedrockEmbeddings,
     BedrockLLM,
     _converse_messages,
 )
+
+# ``DOC_TIMEOUT_SECONDS`` is imported lazily inside the one test that needs it:
+# ``graph_builder`` pulls in ``graph_config``, which raises at import when
+# ``NEO4J_PASSWORD`` is unset. Importing it here would fail collection for the
+# whole file, including the F2 and F3 guards that never touch Neo4j.
 
 
 class TestConverseMessages(unittest.TestCase):
@@ -170,6 +174,11 @@ class TestBedrockClientConfig(unittest.TestCase):
         exposes the raw ``BEDROCK_CONFIG.retries`` as ``{"max_attempts": 2}`` and
         only resolves it to ``total_max_attempts`` once a client is built.
         """
+        try:
+            from graph_builder import DOC_TIMEOUT_SECONDS
+        except RuntimeError as exc:
+            self.skipTest(f"graph_builder needs Neo4j config: {exc}")
+
         config = BedrockLLM().client.meta.config
         read_timeout = config.read_timeout
         total_max_attempts = config.retries["total_max_attempts"]

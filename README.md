@@ -76,6 +76,17 @@ uv run <main_script>.py
 
 Each demo README has specific setup instructions and prerequisites.
 
+### Notebook Setup (nbstripout)
+
+This repository strips notebook output on commit through a git filter declared in `.gitattributes` (`*.ipynb filter=nbstripout diff=ipynb`). Register the filter once after cloning, or every `.ipynb` checkout runs against an undefined filter:
+
+```bash
+pip install nbstripout
+nbstripout --install
+```
+
+Run both commands from the repository root. `nbstripout --install` writes the `filter.nbstripout` entries into your local git config so the `.gitattributes` rule resolves.
+
 ### Neo4j Setup (Demo 01)
 
 Demo 01 requires a Neo4j instance to build and query the knowledge graph.
