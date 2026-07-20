@@ -10,11 +10,24 @@ Replaces OpenAI dependencies with:
 No OpenAI API key required — uses AWS credentials only.
 """
 
+import asyncio
 import json
 import os
 import boto3
+from botocore.config import Config
 from neo4j_graphrag.llm.base import LLMInterface, LLMResponse
 from neo4j_graphrag.embeddings.base import Embedder
+
+
+# botocore defaults to a 60s read timeout and 5 attempts, so one hung call can
+# burn 300s. graph_builder wraps each document in a 180s asyncio.wait_for, and
+# that outer bound cannot govern a larger inner one: the timeout fires while the
+# worker thread keeps running underneath, because a thread cannot be cancelled.
+#
+# max_attempts counts retries, so this resolves to 3 total attempts.
+# Worst case is 3 x 45s plus backoff, roughly 140s, under the 180s bound.
+# Keep that inequality true if you change either number.
+BEDROCK_CONFIG = Config(read_timeout=45, retries={"max_attempts": 2})
 
 
 def _strip_code_fence(text: str) -> str:
@@ -34,6 +47,28 @@ def _strip_code_fence(text: str) -> str:
     return "\n".join(lines[1:]).strip()
 
 
+def _converse_messages(message_history) -> list[dict]:
+    """Convert a neo4j-graphrag message history into Converse API messages.
+
+    `LLMMessage` is a TypedDict, so history entries arrive as plain dicts.
+    Attribute access silently misses on those: every turn would collapse to the
+    dict's repr carried under role "user", relabelling assistant turns as user.
+    A `MessageHistory` object holds the same dicts on `.messages`.
+    """
+    messages = getattr(message_history, "messages", message_history)
+
+    converted = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+        else:
+            role = getattr(msg, "role", "user")
+            content = getattr(msg, "content", str(msg))
+        converted.append({"role": role, "content": [{"text": content}]})
+    return converted
+
+
 class BedrockEmbeddings(Embedder):
     """Amazon Bedrock embeddings using Nova 2 Multimodal Embeddings."""
 
@@ -45,7 +80,9 @@ class BedrockEmbeddings(Embedder):
     ):
         self.model_id = model_id
         self.dimensions = dimensions
-        self.client = boto3.client("bedrock-runtime", region_name=region_name)
+        self.client = boto3.client(
+            "bedrock-runtime", region_name=region_name, config=BEDROCK_CONFIG
+        )
 
     def embed_query(self, text: str) -> list[float]:
         response = self.client.invoke_model(
@@ -76,19 +113,14 @@ class BedrockLLM(LLMInterface):
         max_tokens: int = 4096,
     ):
         self.model_id = model_id
-        self.client = boto3.client("bedrock-runtime", region_name=region_name)
+        self.client = boto3.client(
+            "bedrock-runtime", region_name=region_name, config=BEDROCK_CONFIG
+        )
         self.temperature = temperature
         self.max_tokens = max_tokens
 
     def invoke(self, input: str, message_history=None, system_instruction=None) -> LLMResponse:
-        messages = []
-
-        if message_history:
-            for msg in message_history:
-                role = getattr(msg, "role", "user")
-                content = getattr(msg, "content", str(msg))
-                messages.append({"role": role, "content": [{"text": content}]})
-
+        messages = _converse_messages(message_history) if message_history else []
         messages.append({"role": "user", "content": [{"text": input}]})
 
         inference_config = {"maxTokens": self.max_tokens}
@@ -119,4 +151,9 @@ class BedrockLLM(LLMInterface):
         return LLMResponse(content=_strip_code_fence(content))
 
     async def ainvoke(self, input: str, message_history=None, system_instruction=None) -> LLMResponse:
-        return self.invoke(input, message_history, system_instruction)
+        # `invoke` is a blocking botocore round trip. Awaiting it inline would
+        # block the event loop, so the `asyncio.wait_for` per-document timeout
+        # in graph_builder could never fire. Hand it to a worker thread.
+        return await asyncio.to_thread(
+            self.invoke, input, message_history, system_instruction
+        )

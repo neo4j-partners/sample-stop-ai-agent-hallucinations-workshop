@@ -10,12 +10,13 @@ and neither matched the notebook).
 
 Build order matters and is deliberate:
 
-    canary (1 doc) -> verify typing -> wipe -> ingest everything -> report
+    wipe -> canary (3 docs) -> verify typing -> wipe canary -> ingest all -> report
 
-The wipe happens *after* the canary proves extraction still produces the
-contracted labels. Attendees run this against their own Neo4j instance, so
-destroying a working graph before finding out the build is broken is not an
-acceptable failure mode.
+The wipe happens *before* the canary. The graph this script builds is
+disposable — it is rebuilt from scratch on every run — so there is nothing
+worth preserving across a failed build. Wiping first also means the canary
+runs against an empty graph, so entity resolution has nothing to merge into
+and the check reflects exactly what this run extracted.
 """
 
 import asyncio
@@ -311,9 +312,13 @@ async def run_build(paths: list[Path], title: str) -> int:
     print(f"{title}: {len(paths)} documents\n")
     driver = connect()
     try:
+        print("Clearing this demo's previous graph...")
+        clear_demo_graph(driver)
+        print("✅ Cleared\n")
+
         canary = paths[:CANARY_DOCS]
         names = ", ".join(path.name for path in canary)
-        print(f"Canary: extracting {names} before touching the graph...")
+        print(f"Canary: extracting {names} before ingesting the rest...")
         baseline = snapshot_chunk_ids(driver)
         pipeline = build_pipeline(driver)
         await ingest(pipeline, canary)
@@ -324,13 +329,13 @@ async def run_build(paths: list[Path], title: str) -> int:
             return 1
         problems = check_schema_held(driver, new_chunks)
         if problems:
-            print("\n❌ Canary failed — the existing graph was left untouched:")
+            print("\n❌ Canary failed. The graph was cleared; fix and re-run:")
             for problem in problems:
                 print(f"  - {problem}")
             return 1
         print("✅ Canary passed: extraction matches the documented schema\n")
 
-        print("Clearing this demo's previous graph...")
+        print("Clearing the canary's documents before the full ingest...")
         clear_demo_graph(driver)
         print("✅ Cleared\n")
 

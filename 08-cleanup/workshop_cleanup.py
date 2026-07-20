@@ -223,6 +223,9 @@ class Clients:
     agentcore: Any
     ecr: Any
     codebuild: Any
+    # The region these clients were built for. Carried here so the plan header
+    # cannot disagree with the clients that actually perform the deletions.
+    region: str = REGION
 
     @classmethod
     def build(cls, region: str = REGION) -> Clients:
@@ -233,6 +236,7 @@ class Clients:
             agentcore=boto3.client("bedrock-agentcore-control", region_name=region),
             ecr=boto3.client("ecr", region_name=region),
             codebuild=boto3.client("codebuild", region_name=region),
+            region=region,
         )
 
 
@@ -798,10 +802,10 @@ def execute_plan(
     return failures
 
 
-def print_plan(plan: list[Candidate], *, dry_run: bool) -> None:
+def print_plan(plan: list[Candidate], *, dry_run: bool, region: str) -> None:
     header = "DRY RUN — nothing will be deleted" if dry_run else "TEARDOWN PLAN"
     print("=" * 100)
-    print(f"{header}   region={REGION}   gate={WORKSHOP_TAG_KEY}={WORKSHOP_TAG_VALUE}")
+    print(f"{header}   region={region}   gate={WORKSHOP_TAG_KEY}={WORKSHOP_TAG_VALUE}")
     print("=" * 100)
     for candidate in plan:
         print(candidate.describe())
@@ -815,7 +819,7 @@ def print_plan(plan: list[Candidate], *, dry_run: bool) -> None:
 
 def run(clients: Clients, *, dry_run: bool) -> int:
     plan = build_plan(clients)
-    print_plan(plan, dry_run=dry_run)
+    print_plan(plan, dry_run=dry_run, region=clients.region)
 
     failures: list[Failure] = []
     if not dry_run:

@@ -203,7 +203,7 @@ Generated from a real run. Timings and token counts vary between runs.
 ```
 Approach                                Time              Outcome
 -----------------------------------------------------------------
-Hooks (cancel_tool)                    5.8s              blocked
+Hooks (cancel_tool)                    5.8s           no-booking
 Agent Control (steer)                  8.6s       split-bookings
 
 ✅ CLAIM HOLDS — hooks hard-blocked; Agent Control steered
