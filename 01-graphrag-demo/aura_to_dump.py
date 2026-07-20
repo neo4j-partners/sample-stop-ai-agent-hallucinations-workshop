@@ -16,7 +16,8 @@ Pipeline (all Bolt / neo4j-cli, no Aura admin access required):
 Requires `neo4j-cli` and a running Docker daemon on PATH.
 
 Example:
-    ./aura_to_dump.py --env ./.env --out ./neo4j-hotel-graph.dump
+    ./aura_to_dump.py --limit 25          # smoke test on a 25-node sample
+    ./aura_to_dump.py --out ./neo4j-hotel-graph.dump
 """
 
 from __future__ import annotations
@@ -124,19 +125,8 @@ def load_env(path: Path) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
-# Pipeline steps
+# Export
 # --------------------------------------------------------------------------- #
-def test_connection(env_path: Path) -> None:
-    proc = run(
-        ["neo4j-cli", "query", "RETURN 1 AS ok", "--env", str(env_path), "--format", "json"],
-        capture=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        sys.exit(f"error: could not connect to Aura over Bolt:\n{proc.stderr}")
-    print("  connected to Aura", file=sys.stderr)
-
-
 EXPORT_CONFIG = (
     "{stream: true, format: 'plain', "
     "useOptimizations: {type: 'UNWIND_BATCH', unwindBatchSize: 100}}"
@@ -146,6 +136,7 @@ FULL_EXPORT = (
     f"CALL apoc.export.cypher.all(null, {EXPORT_CONFIG}) "
     "YIELD cypherStatements RETURN cypherStatements"
 )
+
 
 def sample_export(limit: int) -> str:
     """Export `limit` nodes plus the relationships wholly between them.
@@ -164,6 +155,21 @@ CALL apoc.export.cypher.data(nodes, rels, null, {EXPORT_CONFIG})
 YIELD cypherStatements
 RETURN cypherStatements
 """.strip()
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline steps
+# --------------------------------------------------------------------------- #
+def test_connection(env_path: Path) -> None:
+    proc = run(
+        ["neo4j-cli", "query", "RETURN 1 AS ok",
+         "--env", str(env_path), "--format", "json"],
+        capture=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        sys.exit(f"error: could not connect to Aura over Bolt:\n{proc.stderr}")
+    print("  connected to Aura", file=sys.stderr)
 
 
 def export_cypher(env_path: Path, out_file: Path, limit: int, max_rows: int) -> None:
@@ -205,7 +211,8 @@ def export_cypher(env_path: Path, out_file: Path, limit: int, max_rows: int) -> 
 
 def create_local(container: str, data_dir: Path, version: str) -> Local:
     # Start clean so a leftover container / port does not force a rename.
-    run(["neo4j-cli", "docker", "delete", container, "--yes", "--force", "--rw"], check=False)
+    run(["neo4j-cli", "docker", "delete", container, "--yes", "--force", "--rw"],
+        check=False)
     data_dir.mkdir(parents=True, exist_ok=True)
 
     password = secrets.token_urlsafe(18)
@@ -356,7 +363,6 @@ def main() -> None:
     work_dir = Path(tempfile.mkdtemp(prefix="aura-backup-"))
     data_dir = work_dir / "data"
     cypher_file = work_dir / "export.cypher"
-    local: Local | None = None
 
     try:
         print("[1/4] testing Aura connection", file=sys.stderr)
