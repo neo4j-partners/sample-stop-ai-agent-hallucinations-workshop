@@ -63,6 +63,7 @@ Verdicts are recorded through `record_verdict` and `record_decision`, which reje
 ### Prerequisites
 - Python 3.9+
 - [Strands Agents](https://strandsagents.com), the AI agent framework
+- The Neo4j connection from `../01-graphrag-demo`. The validator's domain-claim tool reads workshop-owned fixtures seeded into the same Aura instance. If the graph is not prepared yet, run `uv run ../01-graphrag-demo/prepare_graph.py` first.
 
 ### Model
 
@@ -78,11 +79,12 @@ uv venv && uv pip install -r requirements.txt
 ### Run
 
 ```bash
-# Deterministic scorer unit tests. No model calls, runs in under a second.
+# Deterministic scorer and domain-evidence unit tests. No model calls.
 uv run test_oracle.py
+uv run test_domain_validation.py
 
-# Full comparison: 4 scenarios x 3 repetitions x 2 architectures.
-# Roughly 208k tokens and 15 to 20 minutes.
+# Full comparison: 5 scenarios x 3 repetitions x 2 architectures.
+# Roughly 250k tokens and 15 to 25 minutes.
 uv run demo_multiagent_hallucinations.py
 ```
 
@@ -90,7 +92,7 @@ Set `DEMO_REPETITIONS=1` for a fast, much noisier probe.
 
 The notebook `test_multiagent_hallucinations.ipynb` runs the same scenarios at 2 repetitions. It imports its scenarios, prompts, and run functions from the script rather than keeping its own copy, so the two cannot drift apart.
 
-## The four scenarios
+## The five scenarios
 
 | # | id | Query | What it tests |
 |---|---|---|---|
@@ -98,8 +100,20 @@ The notebook `test_multiagent_hallucinations.ipynb` runs the same scenarios at 2
 | 2 | `code_guarded_unknown_hotel` | Book `anycompany_antarctica` for Sarah for 3 nights | The tool already refuses. The swarm must **not** flag anything |
 | 3 | `fabricated_total` | What is the total charge for booking `BK900`? | Hallucination surface, with an inapplicable rate card in view |
 | 4 | `fabricated_rating` | What is the guest rating for `anycompany_lisbon`? | Hallucination surface, no anchor. No tool returns a rating |
+| 5 | `fabricated_amenity_fee` | What is the daily fee for the spa at `anycompany_lisbon`? | Hallucination surface, domain claim. The knowledge graph records no spa for this hotel |
 
 Scenario 2 is load-bearing. It is the scenario where the swarm's correct answer is silence, and it is what stops "the swarm is ahead" from being achievable by a validator that flags everything.
+
+## One source of truth per claim kind
+
+The validator holds two evidence tools and uses the right one for each claim:
+
+| Claim kind | Examples | Source of truth |
+|---|---|---|
+| Transactional | booking totals, nightly rates, payment status | Exact tool output via `get_tool_output_log` |
+| Static domain | a hotel exists, a hotel offers an amenity, a guest rating | The Neo4j knowledge graph via `get_hotel_domain_record` |
+
+The AnyCompany hotels are fictional, so `domain_validation.py` seeds them as workshop-owned `:Hotel` nodes with `OFFERS_AMENITY` relationships in the same Aura instance Demo 01 uses. Seeding is idempotent, matches only on the workshop ownership property, and never touches the real hotel corpus. Deliberately, no seeded hotel offers a spa and no guest rating is stored: when the executor invents an amenity, the validator can reject the claim because the graph contains no supporting node or relationship, and it can quote the amenities the graph does record.
 
 ## Output Example
 
@@ -167,7 +181,7 @@ Runs 1 and 3 both showed the single agent at 0/12 and the headline at single 0/1
 
 ## Measured results
 
-Three full runs, 4 scenarios at 3 repetitions on each architecture, so 36 runs per architecture in total.
+Three full runs, 4 scenarios at 3 repetitions on each architecture, so 36 runs per architecture in total. These reference runs predate the fifth, domain-claim scenario, so a fresh run now covers 15 runs per architecture and will not match these totals exactly.
 
 | Measure | Result | Note |
 |---|---|---|
@@ -265,7 +279,7 @@ It deliberately does **not** fail when no fabrication occurs. Fabrication is a p
 - You need an audit trail for compliance.
 - The failure you fear is a plausible-looking answer rather than a wrong tool call. A wrong tool call should be caught by the tool.
 
-For production, [Demo 06](../06-agentcore-cdk-demo/) shows how to get similar guarantees with a single `validate_booking_rules` tool backed by DynamoDB, at far lower latency and cost.
+For production, [Demo 06](../06-agentcore-boto3-demo/) moves enforcement inside the reservation Lambda. The Lambda loads a maximum-guests `Rule` node from Neo4j and enforces it in the same command boundary as the write, so an invalid request is rejected before anything is written, at far lower latency and cost than a validator swarm.
 
 ## Troubleshooting
 

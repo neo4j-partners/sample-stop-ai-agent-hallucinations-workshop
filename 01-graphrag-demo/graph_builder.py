@@ -40,6 +40,11 @@ from graph_config import (
     SCHEMA_NODE_LABELS,
     neo4j_auth,
 )
+from retrieval_setup import (
+    ensure_retrieval_indexes,
+    missing_source_fixtures,
+    report_readiness,
+)
 
 # Must sit above the worst case of the Bedrock retry chain (see F16 /
 # bedrock_providers.BEDROCK_CONFIG): 3 attempts x 45s + backoff = ~135s < 180s.
@@ -312,6 +317,13 @@ async def run_build(paths: list[Path], title: str) -> int:
         print("No documents selected.")
         return 1
 
+    missing_sources = missing_source_fixtures(paths)
+    if missing_sources:
+        print("Demo-critical source documents are missing from this build:")
+        for filename in missing_sources:
+            print(f"  - {filename}")
+        return 1
+
     print(f"{title}: {len(paths)} documents\n")
     driver = connect()
     try:
@@ -350,21 +362,41 @@ async def run_build(paths: list[Path], title: str) -> int:
         # otherwise-successful build. It owns no resource needing release; the
         # driver is closed in the `finally` below.
 
-        processed = len(paths) - errors
+        acknowledged = len(paths) - errors
         print(f"\n{'=' * 60}")
-        print(f"BUILD COMPLETE ({processed}/{len(paths)} docs processed)")
+        print(
+            f"BUILD COMPLETE ({acknowledged}/{len(paths)} ingests acknowledged)"
+        )
         print(f"{'=' * 60}")
 
         documents = count_documents(driver)
         chunks = count_chunks(driver)
-        print(f"\n:Document nodes: {documents} (expected {processed})")
-        print(f":Chunk nodes: {chunks} (expected {documents}, one chunk per document)")
-        if documents != processed:
+        expected = len(paths)
+        print(f"\n:Document nodes: {documents} (expected {expected})")
+        print(f":Chunk nodes: {chunks} (expected {expected}, one chunk per document)")
+        if documents != expected or chunks != expected:
             print(
-                "❌ Document count does not match the files processed. "
-                "That means a concurrent build overlapped this one, or a "
-                "partial run was left behind."
+                "❌ Document or chunk count does not match the selected source "
+                "files. That means a build was incomplete, another build "
+                "overlapped this one, or a partial run was left behind."
             )
+            return 1
+        if errors:
+            print(
+                "⚠️ One or more client acknowledgements were lost, but every "
+                "source has a committed Document and Chunk. Continuing with "
+                "graph fixture validation."
+            )
+
+        print("\nCreating and verifying Demo 01b retrieval indexes...")
+        ensure_retrieval_indexes(driver)
+        print("✅ Retrieval indexes are online and match the embedding contract")
+
+        readiness_problems = report_readiness(driver, expected_documents=expected)
+        if readiness_problems:
+            print("\n❌ Demo-critical fixture validation failed:")
+            for problem in readiness_problems:
+                print(f"  - {problem}")
             return 1
 
         report(driver)

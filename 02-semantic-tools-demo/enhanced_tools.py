@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT-0
 """
 Enhanced Travel Agent Tools
-Combines mock tools with real hotel database access
+Combines mock tools with real hotel database access. The two real-data hotel
+tools query the Demo 01 knowledge graph; Neo4j is a requirement of this demo,
+so there is no mock fallback.
 """
 import os
 import sys
@@ -19,48 +21,15 @@ _GRAPH_TOOLS_DIR = os.path.abspath(
 if _GRAPH_TOOLS_DIR not in sys.path:
     sys.path.append(_GRAPH_TOOLS_DIR)
 
-try:
-    from graph_tool import query_hotel_knowledge_graph
-except ImportError:
-    # The Neo4j tools are not importable at all — fall back to a mock.
-    def query_hotel_knowledge_graph(cypher_query: str) -> str:
-        return f"Mock: Would execute Cypher query: {cypher_query[:100]}..."
+# Load the Demo 01 .env by explicit path before importing graph_tool. Its own
+# find_dotenv falls back to the process working directory inside a Jupyter
+# kernel, and this demo's kernel runs with 02-semantic-tools-demo as cwd, so
+# the credentials would not be found. Existing environment variables win.
+from dotenv import load_dotenv  # noqa: E402
 
+load_dotenv(os.path.join(_GRAPH_TOOLS_DIR, "..", ".env"))
 
-def _neo4j_available() -> bool:
-    """Return True only when Neo4j is both importable AND reachable.
-
-    Importing graph_tool succeeds even with no database running, so the import
-    alone says nothing about connectivity. This opens a short-timeout driver
-    and verifies the connection. Any failure (missing driver, unreachable
-    server, bad credentials) means the real-data hotel tools cannot run, so the
-    demo falls back to mock responses. Defensive by design: importing this
-    module must never crash, so every failure mode is treated as "unavailable".
-    """
-    try:
-        from neo4j import GraphDatabase
-
-        from graph_tool import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USERNAME
-
-        driver = GraphDatabase.driver(
-            NEO4J_URI,
-            auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
-            connection_timeout=3,
-            # This probe runs at module import, so an unbounded acquisition here
-            # hangs notebook startup with no output. connection_timeout covers only
-            # the TCP connect; this ceiling also covers the TLS and Bolt handshakes (F15).
-            connection_acquisition_timeout=5,
-        )
-        try:
-            driver.verify_connectivity()
-        finally:
-            driver.close()
-        return True
-    except Exception:
-        return False
-
-
-NEO4J_AVAILABLE = _neo4j_available()
+from graph_tool import query_hotel_knowledge_graph  # noqa: E402
 
 # ============================================================================
 # HOTEL TOOLS (Real Database + Mock)
@@ -69,8 +38,6 @@ NEO4J_AVAILABLE = _neo4j_available()
 @tool
 def search_real_hotels(country: str, min_rating: float = 0.0) -> str:
     """Search actual verified hotels from real hotel database by country. Queries knowledge graph for authentic hotel data in France, Spain, Italy, Germany, Japan, etc. Returns real hotel names, addresses, verified ratings. Use when user specifically says 'real hotels' or wants database-verified properties."""
-    if not NEO4J_AVAILABLE:
-        return f"Mock: Hotels in {country} with rating >= {min_rating}"
     try:
         # Generate Cypher query with correct snake_case property names
         query = f"""
@@ -89,8 +56,6 @@ def search_real_hotels(country: str, min_rating: float = 0.0) -> str:
 @tool
 def get_top_hotels(limit: int = 5) -> str:
     """Get highest-rated best hotels globally from database. Shows top luxury hotels, best reviewed properties, highest guest satisfaction ratings worldwide. Use for 'best hotels' or 'top rated hotels' queries."""
-    if not NEO4J_AVAILABLE:
-        return f"Mock: Top {limit} hotels"
     try:
         # Generate Cypher query with correct snake_case property names
         query = f"""
@@ -319,14 +284,10 @@ def cancel(item: str) -> str:
 # ALL TOOLS COLLECTION
 # ============================================================================
 
-ALL_TOOLS = []
+ALL_TOOLS = [
+    # Real database tools (Neo4j knowledge graph)
+    search_real_hotels, get_top_hotels,
 
-# Add real database tools if Neo4j is available
-if NEO4J_AVAILABLE:
-    ALL_TOOLS.extend([search_real_hotels, get_top_hotels])
-
-# Add all other tools
-ALL_TOOLS.extend([
     # Hotel tools (mock)
     search_hotels, search_hotel_reviews, get_hotel_details, get_hotel_pricing, 
     check_hotel_availability, book_hotel, check_hotel_availability_dates, compare_hotel_prices,
@@ -346,4 +307,4 @@ ALL_TOOLS.extend([
     
     # Generic/ambiguous tools
     search, check, get_details, get_status, get_info, book, cancel
-])
+]

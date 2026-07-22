@@ -11,7 +11,7 @@
 #     "boto3>=1.35.0",
 #     "numpy>=1.24.0",
 #     "neo4j>=5.28.0",
-#     "neo4j-graphrag>=1.13.0",
+#     "neo4j-graphrag>=1.18.0",
 #     "faiss-cpu>=1.9.0",
 #     "python-dotenv>=1.0.1",
 #     "agent-control-sdk>=0.0.1",
@@ -84,6 +84,10 @@ NOTEBOOKS = (
     Notebook(
         "1",
         REPO_ROOT / "01-graphrag-demo" / "test_graphrag.ipynb",
+    ),
+    Notebook(
+        "1",
+        REPO_ROOT / "01-graphrag-demo" / "retrieval_patterns.ipynb",
     ),
     Notebook(
         "2",

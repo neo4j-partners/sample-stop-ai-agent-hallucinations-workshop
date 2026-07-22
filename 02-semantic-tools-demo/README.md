@@ -4,9 +4,9 @@
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://python.org)
 [![Strands Agents](https://img.shields.io/badge/Strands_Agents-1.27+-00B4D8.svg?style=flat)](https://strandsagents.com)
-[![FAISS](https://img.shields.io/badge/FAISS-Semantic_Filtering-blue.svg?style=flat)](https://github.com/facebookresearch/faiss)
+[![Neo4j](https://img.shields.io/badge/Neo4j-Tool_Graph-blue.svg?style=flat)](https://neo4j.com)
 
-**AI agents with many similar tools waste tokens sending every schema on every call. This demo builds a travel agent with Strands Agents and uses FAISS to filter 29 tools down to the top 3 most relevant, then measures what that costs and what it saves.**
+**AI agents with many similar tools waste tokens sending every schema on every call. This demo builds a travel agent with Strands Agents, stores the 31 tools as a graph in Neo4j, and uses Neo4j vector search to filter them down to the top 3 most relevant. The notebook runs three live questions and explains each selection with both the similarity scores and the graph relationships; the full 24-query cost and accuracy measurement lives in a separate maintainer script.**
 
 Based on research: ["Internal Representations as Indicators of Hallucinations in Agent Tool Selection"](https://arxiv.org/abs/2601.05214)
 
@@ -22,7 +22,7 @@ Research ([Internal Representations, 2025](https://arxiv.org/abs/2601.05214)) id
 
 **The dual problem**:
 - ❌ **Hallucination risk**: More tools = more inappropriate selections
-- ❌ **Token waste**: Sending all tool descriptions on every call. Measured at ~6,500 tokens per query for 29 tools in this demo, counting the tool schemas plus system prompt, user turn, tool results, and model output.
+- ❌ **Token waste**: Sending all tool descriptions on every call. Measured at ~6,800 tokens per query for 31 tools by this demo's maintainer harness, counting the tool schemas plus system prompt, user turn, tool results, and model output.
 
 ## The Solution
 
@@ -30,7 +30,7 @@ Semantic tool selection filters tools **before** the agent sees them:
 
 ![Semantic tool selection flow diagram](images/semantic-tool-selection.png)
 
-**Measured result: a 74.1% token reduction over 24 queries, at an accuracy cost of one query.** See [What this demo actually measures](#what-this-demo-actually-measures) for the full figures and how to read them.
+**Measured result: a 75.0% token reduction over 24 queries, at an accuracy cost of one query.** See [What this demo actually measures](#what-this-demo-actually-measures) for the full figures and how to read them.
 
 ### Why Strands Agents Supports This at Scale
 
@@ -64,7 +64,7 @@ Learn more: [Strands Tool Registry](https://strandsagents.com/docs/user-guide/co
 
 - Python 3.9+
 - [Strands Agents](https://strandsagents.com) — AI agent framework
-- Optional: Neo4j connection for real hotel data (from `../01-graphrag-demo`)
+- Neo4j connection from `../01-graphrag-demo` — the tool graph and the real hotel data live in the same Aura instance as Demo 01
 
 ### Model
 
@@ -74,7 +74,7 @@ You can swap the model for any provider supported by Strands — Amazon Bedrock,
 
 ### Configure Credentials
 
-AWS credentials are the only credential this demo needs. No `.env` file and no API keys from any other provider are required.
+This demo needs AWS credentials for Bedrock and the Neo4j connection configured for Demo 01 in `../01-graphrag-demo/.env`. If the graph is not prepared yet, run `uv run ../01-graphrag-demo/prepare_graph.py` first. No API keys from any other provider are required.
 
 ### Install
 
@@ -86,32 +86,43 @@ uv venv && uv pip install -r requirements.txt
 
 | File | Purpose |
 |------|---------|
-| `token_efficiency_analysis.ipynb` | **Main demo** - Comprehensive notebook with 29 tools, ground truth verification |
-| `token_comparison_app.py` | **Token savings verification** - Standalone script to measure token reduction |
-| `enhanced_tools.py` | The 29 travel agent tools, 2 of which read optional Neo4j data |
-| `registry.py` | FAISS-based semantic tool filtering |
+| `token_efficiency_analysis.ipynb` | **Main demo, the live path** - Three representative questions, each explained with similarity scores and graph relationships, plus one bounded agent call |
+| `maintainer_harness.py` | **Maintainer-only validation** - The full 24-query Traditional vs Semantic vs Semantic+Memory measurement with accuracy scoring and error analysis |
+| `token_comparison_app.py` | **Token savings verification** - Standalone script to measure token reduction over 3 queries |
+| `enhanced_tools.py` | The 31 travel agent tools, 2 of which read real Neo4j hotel data |
+| `registry.py` | Semantic tool filtering backed by the Neo4j vector index |
+| `tool_graph.py` | Tool graph schema, idempotent build, vector search, and workflow expansion |
 
 ## Run the Demo
 
-```bash
 Open `token_efficiency_analysis.ipynb` in your IDE (VS Code, Kiro, or any editor with notebook support).
+
+**What it does**:
+1. Builds the Neo4j tool graph and its vector index (idempotent)
+2. Runs three representative questions: a hotel search, a booking, and a cancellation
+3. For each question, prints the top-3 vector candidates with similarity scores and the graph-expanded tools with the relationship that caused each inclusion
+4. Ends with one live agent call using only the 3 selected tools
+
+The three questions were chosen because their top-3 candidates are stable across repeated runs against the live graph, so they are safe to run in front of an audience.
+
+## Maintainer Validation: the Full 24-Query Harness
+
+The measured figures quoted in this README come from `maintainer_harness.py`, which is maintainer-only validation, not part of the workshop path. It makes roughly 72 live Bedrock agent calls:
+
+```bash
+uv run maintainer_harness.py             # full 24-query run
+uv run maintainer_harness.py --limit 3   # quick smoke run
 ```
 
 **What it does**:
-1. Tests 24 travel queries against 29 tools
-2. Compares Traditional, which sends all 29 tools, against Semantic, which sends the top 3
-3. Scores each tool call against ground truth from the real hotel database
-4. Reports measured token cost and measured accuracy for both, whichever way they come out
-
-**Key features**:
-- Real hotel data from Neo4j graph database
-- Objective accuracy measurement, scored against ground truth rather than model prose
-- Detailed error analysis, including which queries lost the correct tool to the top-3 cut
-- Token cost comparison
+1. Tests 24 travel queries against 31 tools
+2. Compares Traditional (all 31 tools), Semantic (top 3), and Semantic+Memory (top 3, bounded history)
+3. Scores each tool call against ground truth
+4. Reports measured token cost and measured accuracy for all three, whichever way they come out, including an error analysis of which queries lost the correct tool to the top-3 cut
 
 ## Verify Token Savings
 
-Run the standalone token comparison script to verify the savings claimed in Part 3 of the notebook:
+Run the standalone token comparison script for a quick 3-query check of the same effect:
 
 ```bash
 uv run token_comparison_app.py
@@ -138,52 +149,59 @@ Find flights from NYC to London                   7001     1953     2317     468
 Book a hotel in Rome for John                     3378     2924     4133     -755
 ```
 
-The 24-query notebook measures the same effect at larger scale:
+The 24-query maintainer harness measures the same effect at larger scale, real stdout from `maintainer_harness.py` over the 31-tool pool:
 
 ```
-💰 Token Consumption:
-   Traditional:      155,452 tokens (6477 avg)
-   Semantic:         40,203 tokens (1675 avg)
-   Semantic+Memory:  97,404 tokens (4058 avg)
+Token Consumption:
+   Traditional:      162,719 tokens (6780 avg)
+   Semantic:         40,647 tokens (1694 avg)
+   Semantic+Memory:  78,769 tokens (3282 avg)
 
-💡 Token Savings (measured this run, not a cited figure):
-   Semantic vs Traditional:  115,249 tokens (74.1% reduction)
-   Memory vs Traditional:    58,048 tokens (37.3% reduction)
+Token Savings (measured this run, not a cited figure):
+   Semantic vs Traditional:  122,072 tokens (75.0% reduction)
+   Memory vs Traditional:    83,950 tokens (51.6% reduction)
 ```
 
-**These numbers are LLM output and vary between runs.** Expect roughly 60-75% reduction for the semantic approach depending on query mix and turn count, not a single fixed figure. The 3-query script and the 24-query notebook measure different workloads and should not be expected to agree.
+**These numbers are LLM output and vary between runs.** Expect roughly 60-75% reduction for the semantic approach depending on query mix and turn count, not a single fixed figure. The 3-query script and the 24-query harness measure different workloads and should not be expected to agree.
+
+**Note on tool counts.** The measured runs quoted above were taken with a 29-tool pool from an earlier version of this demo. Neo4j is now a requirement, so the two real-data hotel tools are always present and the pool is 31. The 31-tool figures in the next section come from a fresh `maintainer_harness.py` run.
 
 ## What this demo actually measures
 
 The honest version of this demo's result, stated in full:
 
-> Over 24 travel queries against 29 tools, filtering to the top 3 by FAISS similarity
-> reduced token consumption by **74.1%**, from 155,452 tokens to 40,203. On the same
-> run, tool selection accuracy was **16/24 for Traditional and 15/24 for Semantic**,
+> Over 24 travel queries against 31 tools, filtering to the top 3 by vector similarity
+> reduced token consumption by **75.0%**, from 162,719 tokens to 40,647. On the same
+> run, tool selection accuracy was **18/24 for Traditional and 17/24 for Semantic**,
 > a difference of **one query**.
 
 **That accuracy difference is not a result.** At n=24, one query is a single sample. It
 is not evidence that semantic filtering harms accuracy, and it is not evidence that it
 helps. Establishing either would need a far larger evaluation than this workshop runs.
-The 15-versus-16 split has now reproduced across three runs, which makes it a stable
-observation about this particular query set, not a measurement of the technique.
+A one-query gap between Traditional and Semantic has now reproduced across several
+runs, including earlier 29-tool runs that measured 16/24 versus 15/24, which makes it
+a stable observation about this particular query set, not a measurement of the
+technique.
 
 So the claim this demo supports is a **cost tradeoff, not an accuracy win**:
 
-| Measured over 24 queries | Traditional | Semantic |
-|---|---|---|
-| Total tokens | 155,452 | 40,203 |
-| Avg tokens/query | 6,477 | 1,675 |
-| Token reduction | baseline | **74.1%** |
-| Tool selection accuracy | 16/24 | 15/24 |
-| Accuracy difference | baseline | 1 query, within noise at this sample size |
+| Measured over 24 queries | Traditional | Semantic | Semantic + Memory |
+|---|---|---|---|
+| Total tokens | 162,719 | 40,647 | 78,769 |
+| Avg tokens/query | 6,780 | 1,694 | 3,282 |
+| Token reduction | baseline | **75.0%** | 51.6% |
+| Tool selection accuracy | 18/24 | 17/24 | 18/24 |
+| Accuracy difference | baseline | 1 query, within noise at this sample size | none |
 
 **Why filtering can cost accuracy at all.** Semantic filtering can only help the agent
-if the correct tool survives the top-3 cut. When FAISS ranks the right tool fourth or
-lower, the agent never sees it and cannot recover, no matter how capable the model is.
-The notebook's Error Analysis cell labels exactly these cases with
-`⚠️ Correct tool NOT in top-3 (FAISS filtering issue)`. That is the real failure mode to
-understand, and it is the one to tune `top_k` against on your own tool set.
+if the correct tool survives the top-3 cut. When vector search ranks the right tool
+fourth or lower, the agent never sees it and cannot recover, no matter how capable the
+model is. The harness's error analysis labels exactly these cases with
+`Correct tool NOT in top-3 (vector filtering issue)`. That is the real failure mode to
+understand, and it is the one to tune `top_k` against on your own tool set. The
+notebook's three live questions surface workflow-related tools with the relationship
+that caused each inclusion; treat that as discovery and explainability, not as a fix
+for a missed top-3 cut.
 
 **Why this demo reports it this way.** An earlier version of this README claimed
 semantic filtering improved accuracy. Measurement did not support that, so the claim
@@ -201,7 +219,7 @@ need an accuracy claim propped up next to it.
 > above do not support. The files remain on disk pending regeneration. The real stdout
 > quoted above replaces them.
 
-**Where the savings come from**: the tool schemas are the only part of the prompt that semantic filtering removes. Dropping 29 schemas to 3 is the constant-size win. System prompt, user turn, tool results, and model output are unaffected and are included in every figure above, which is why the measured reduction is below what a schema-only calculation predicts.
+**Where the savings come from**: the tool schemas are the only part of the prompt that semantic filtering removes. Dropping 31 schemas to 3 is the constant-size win. System prompt, user turn, tool results, and model output are unaffected and are included in every figure above, which is why the measured reduction is below what a schema-only calculation predicts.
 
 **Bounded conversation history**: the memory variant trims to the last 3 turns via `trim_history()`. Without a bound, the full transcript is resent on every call, cost grows quadratically with turn count, and the memory variant becomes more expensive than sending all 29 tools every time.
 
@@ -209,16 +227,16 @@ need an accuracy claim propped up next to it.
 
 ### Traditional Approach (Baseline)
 ```python
-# Agent sees ALL 29 tools on every query
+# Agent sees ALL 31 tools on every query
 agent = Agent(tools=ALL_TOOLS, model=model)
 agent("How much does Hotel Marriott cost?")
-# Measured: ~6,500 tokens/query across the 24-query notebook run
-# Risk: Picks wrong tool from 29 options
+# Measured: ~6,800 tokens/query across the 24-query maintainer harness run
+# Risk: Picks wrong tool from 31 options
 ```
 
 ### Semantic Approach (Optimized)
 ```python
-# 1. Build FAISS index once
+# 1. Build the Neo4j tool graph once (idempotent)
 build_index(ALL_TOOLS)
 
 # 2. Filter tools per query
@@ -267,20 +285,35 @@ Learn more: [Strands Agent Architecture](https://strandsagents.com/docs/user-gui
 
 - [Search for tools in your Amazon Bedrock AgentCore gateway with a natural language query](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-using-mcp-semantic-search.html?trk=87c4c426-cddf-4799-a299-273337552ad8&sc_channel=el)
 
+## The Neo4j Tool Graph
+
+The tools live in the same Aura instance as the Demo 01 hotel knowledge graph:
+
+```
+(:Tool {name, description, embedding, domain, workshop})
+(:Tool)-[:IN_DOMAIN]->(:Domain)
+(:Tool)-[:REQUIRES]->(:Concept)
+(:Tool)-[:PRODUCES]->(:Concept)
+```
+
+- **Vector search.** The `tool_description_embeddings` index (1024 dimensions, cosine, Nova 2 embeddings) serves the top-k candidate selection used by all three tests.
+- **Workflow expansion.** A concept one tool `PRODUCES` and another tool `REQUIRES` is a workflow edge: `book_hotel` produces a `booking`, `process_payment` requires one. The notebook's three live questions walk these relationships from the vector candidates and report, for each expanded tool, the relationship that caused its inclusion.
+- **Ownership.** Every tool-graph node carries `workshop: 'stop-ai-agent-hallucinations'`, so scoped cleanup can remove the tool graph without touching the hotel domain graph.
+- **Idempotent build.** `build_index(ALL_TOOLS)` re-embeds and replaces the tool graph in place, removes tools no longer in the list, and verifies the vector index is online.
+
 ## Enhanced Tools with Real Data
 
-The notebook includes 6 tools connected to the Neo4j hotel database:
+Two of the 31 tools are connected to the Neo4j hotel database:
 
 ```python
 @tool
 def search_real_hotels(country: str, min_rating: float = 0.0) -> str:
     """Search real hotels in a specific country from our database."""
     # Executes Cypher query on Neo4j
-    # Returns actual hotel data from 515K reviews
 
 @tool
-def get_top_hotels(country: str, limit: int = 5) -> str:
-    """Get top-rated hotels in a country."""
+def get_top_hotels(limit: int = 5) -> str:
+    """Get top-rated hotels globally."""
     # Real aggregation from graph database
 ```
 
@@ -296,9 +329,9 @@ This demo implements findings from:
 
 ### How much does semantic tool selection reduce token usage?
 
-**Measured in this demo: 61.5% over 3 queries (`token_comparison_app.py`) and 74.1% over 24 queries (`token_efficiency_analysis.ipynb`).** Both figures are LLM output and move between runs, so treat 60-75% as the range this demo reproduces rather than a fixed number.
+**Measured in this demo: 61.5% over 3 queries (`token_comparison_app.py`) and 75.0% over 24 queries (`maintainer_harness.py`).** Both figures are LLM output and move between runs, so treat 60-75% as the range this demo reproduces rather than a fixed number.
 
-FAISS-based filtering sends the top 3 tool schemas instead of all 29. That saving is constant per query, but it applies only to the schema portion of the prompt. System prompt, user turn, tool results, and model output are unchanged, which is why the end-to-end reduction lands below a schema-only estimate.
+Neo4j vector filtering sends the top 3 tool schemas instead of all 31. That saving is constant per query, but it applies only to the schema portion of the prompt. System prompt, user turn, tool results, and model output are unchanged, which is why the end-to-end reduction lands below a schema-only estimate.
 
 A separate published figure of **89%** comes from a third-party writeup, [rconnect.tech](https://www.rconnect.tech/blog/semantic-tool-selection-guide). It is a citation from someone else's production system, not a result this demo produces.
 
@@ -306,17 +339,17 @@ A separate published figure of **89%** comes from a third-party writeup, [rconne
 
 No. Strands Agents' `swap_tools()` function changes the available tools at runtime without recreating the agent, preserving conversation history in `agent.messages`. This is a key production advantage over frameworks that require agent recreation to change tools.
 
-Preserved history is not free. It is resent on every call, so an unbounded transcript grows cost quadratically with turn count and will overtake the saving from filtering tools. This demo bounds history to the last 3 turns with `trim_history()`. Measured over 24 queries, the bounded memory variant uses 97,404 tokens against a 155,452-token traditional baseline, a 37.3% reduction. It costs more than stateless semantic filtering at 40,203 tokens, which is the price of keeping the conversation.
+Preserved history is not free. It is resent on every call, so an unbounded transcript grows cost quadratically with turn count and will overtake the saving from filtering tools. This demo bounds history to the last 3 turns with `trim_history()`. Measured over 24 queries, the bounded memory variant uses 78,769 tokens against a 162,719-token traditional baseline, a 51.6% reduction. It costs more than stateless semantic filtering at 40,647 tokens, which is the price of keeping the conversation.
 
 ### Does semantic filtering improve tool selection accuracy?
 
-**Not measurably, on this demo's evidence.** Over 24 queries, Traditional scored 16/24 and Semantic scored 15/24. That one-query gap is within noise at this sample size and should not be read as a finding in either direction. See [What this demo actually measures](#what-this-demo-actually-measures).
+**Not measurably, on this demo's evidence.** Over 24 queries, Traditional scored 18/24 and Semantic scored 17/24. That one-query gap is within noise at this sample size and should not be read as a finding in either direction. See [What this demo actually measures](#what-this-demo-actually-measures).
 
-The reason to adopt semantic filtering here is the 74.1% token reduction, which is large and reproduces across runs. Treat accuracy as something to measure on your own tool set rather than a benefit that comes bundled with the cost saving. If the correct tool falls outside the top 3, the agent cannot call it at all, so `top_k` is the parameter to tune against your own query mix.
+The reason to adopt semantic filtering here is the 75.0% token reduction, which is large and reproduces across runs. Treat accuracy as something to measure on your own tool set rather than a benefit that comes bundled with the cost saving. If the correct tool falls outside the top 3, the agent cannot call it at all, so `top_k` is the parameter to tune against your own query mix.
 
 ### Can I use semantic tool selection with other agent frameworks?
 
-Yes. The core pattern — embedding tool descriptions with FAISS and filtering by cosine similarity before the LLM sees them — is framework-agnostic. You can implement it in LangGraph, CrewAI, AutoGen, or any framework. Amazon Bedrock AgentCore Gateway also provides built-in [MCP semantic routing](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-using-mcp-semantic-search.html?trk=87c4c426-cddf-4799-a299-273337552ad8&sc_channel=el) for production workloads.
+Yes. The core pattern, embedding tool descriptions into a vector index and filtering by cosine similarity before the LLM sees them, is framework-agnostic. You can implement it in LangGraph, CrewAI, AutoGen, or any framework. Amazon Bedrock AgentCore Gateway also provides built-in [MCP semantic routing](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-using-mcp-semantic-search.html?trk=87c4c426-cddf-4799-a299-273337552ad8&sc_channel=el) for production workloads.
 
 ---
 

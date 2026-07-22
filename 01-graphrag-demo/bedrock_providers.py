@@ -22,6 +22,12 @@ from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.message_history import MessageHistory
 from neo4j_graphrag.types import LLMMessage
 
+from retrieval_contract import (
+    EMBEDDING_DIMENSIONS,
+    EMBEDDING_MODEL_ID,
+    EMBEDDING_PURPOSE,
+)
+
 
 # botocore defaults to a 60s read timeout and 5 attempts, so one hung call can
 # burn 300s. graph_builder wraps each document in a 180s asyncio.wait_for, and
@@ -81,9 +87,9 @@ class BedrockEmbeddings(Embedder):
 
     def __init__(
         self,
-        model_id: str = "amazon.nova-2-multimodal-embeddings-v1:0",
+        model_id: str = EMBEDDING_MODEL_ID,
         region_name: str | None = None,
-        dimensions: int = 1024,
+        dimensions: int = EMBEDDING_DIMENSIONS,
     ):
         # Resolve the region inside the body: an os.environ default argument is
         # evaluated once at import, before the caller can set AWS_REGION.
@@ -101,7 +107,7 @@ class BedrockEmbeddings(Embedder):
             body=json.dumps({
                 "taskType": "SINGLE_EMBEDDING",
                 "singleEmbeddingParams": {
-                    "embeddingPurpose": "GENERIC_INDEX",
+                    "embeddingPurpose": EMBEDDING_PURPOSE,
                     "embeddingDimension": self.dimensions,
                     "text": {"truncationMode": "END", "value": text},
                 },

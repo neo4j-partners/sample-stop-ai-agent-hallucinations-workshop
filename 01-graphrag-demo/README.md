@@ -102,8 +102,8 @@ Process only 30 documents (10% of dataset) for quick testing:
 # Build FAISS vector index (fast, ~30 seconds)
 uv run load_vector_data_lite.py
 
-# Build Neo4j knowledge graph (~10-15 minutes)
-uv run build_graph_lite.py
+# Prepare the Neo4j graph and Demo 01b indexes (~10-15 minutes when needed)
+uv run prepare_graph.py --mode lite
 ```
 
 **Option B: Full Version (~2 hours)**
@@ -114,15 +114,38 @@ Process all 300 documents for complete dataset:
 # Build FAISS vector index (fast, ~1 min)
 uv run load_vector_data.py
 
-# Build Neo4j knowledge graph (slower, ~2 hours - uses LLM for entity extraction)
-uv run build_graph.py
+# Prepare the full Neo4j graph and Demo 01b indexes (~2 hours when needed)
+uv run prepare_graph.py --mode full
 ```
+
+`prepare_graph.py` is idempotent. It verifies the selected graph, creates any
+missing retrieval indexes, and reports document, chunk, extracted-label, and
+relationship counts. It skips graph extraction when everything is already
+ready. Use `--check-only` for a read-only readiness check or `--rebuild` to
+force a clean rebuild.
 
 ### 5. Run Demo
 
 ```bash
 uv run travel_agent_demo.py
 ```
+
+The comparison is also available as
+[`test_graphrag.ipynb`](test_graphrag.ipynb).
+
+### 6. Optional: Compare Neo4j Retrieval Patterns
+
+After the RAG vs Graph-RAG comparison, open
+[`retrieval_patterns.ipynb`](retrieval_patterns.ipynb) to compare:
+
+- `VectorRetriever` for semantic lookup
+- `HybridRetriever` for exact names, terms, and identifiers
+- `VectorCypherRetriever` for semantic lookup plus graph traversal
+- `Text2CypherRetriever` for aggregations, counts, and structured questions
+
+The optional notebook reuses the chunk embeddings created during graph build.
+It displays retrieved context, scores, generated Cypher, and records without a
+second LLM answer-generation step.
 
 
 ## 🔧 How It Works

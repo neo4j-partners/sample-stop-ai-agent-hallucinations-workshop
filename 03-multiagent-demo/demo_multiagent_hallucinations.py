@@ -6,9 +6,14 @@ Based on: https://arxiv.org/pdf/2510.19507 (Teaming LLMs to Detect and Mitigate 
 
 What this measures
 ------------------
-The same four scenarios run on two architectures, single agent and an
+The same five scenarios run on two architectures, single agent and an
 Executor -> Validator -> Critic swarm, with the *identical* executor prompt.
 Only the validation layer differs, so the comparison isolates it.
+
+The validator works from two sources of truth, one per claim kind:
+transactional figures are checked against exact tool output, and static domain
+facts (a hotel's existence, an amenity, a rating) are checked against the
+Neo4j knowledge graph through a read-only lookup tool.
 
 Read this before quoting any number from this script
 ----------------------------------------------------
@@ -58,6 +63,7 @@ from oracle import (
     usage_delta,
     usage_snapshot,
 )
+from domain_validation import get_hotel_domain_record, seed_domain_fixtures
 from tools import book_hotel, get_booking, reset_bookings, search_hotels
 
 # Model configuration — Amazon Bedrock (default, requires AWS credentials)
@@ -113,6 +119,16 @@ executor that invented a figure has no reason to mention it when handing off.
 1. Call get_answer_under_review to read the exact answer the executor gave.
 2. Call get_tool_output_log to read the exact text every tool returned.
 3. Check every figure in the answer against that tool output.
+4. When the answer makes a static domain claim, call get_hotel_domain_record
+   and check the claim against the knowledge graph.
+
+Use the right source of truth for each kind of claim:
+- Transactional claims (booking totals, nightly rates, payment amounts) are
+  supported only by exact tool output.
+- Static domain claims (a hotel exists, a hotel offers an amenity, a guest
+  rating) are supported only by the knowledge graph record. An amenity absent
+  from the hotel's OFFERS_AMENITY list has no supporting relationship in the
+  graph, and any price or fee attached to it is unsupported too.
 
 A figure the executor stated to the guest that does not appear in the tool
 output is unsupported, however plausible it looks. Deriving a total from a
@@ -120,8 +136,8 @@ nightly rate that belongs to a different property is unsupported. A rate the
 tools reported as NOT AVAILABLE cannot be supplied from anywhere else.
 
 Then call record_verdict exactly once:
-  verdict='VALID' when every figure in the answer is backed by tool output
-  verdict='HALLUCINATION' when any figure is not
+  verdict='VALID' when every claim in the answer is backed by its evidence
+  verdict='HALLUCINATION' when any claim is not
 
 Report a genuine problem or report none. Do not flag a correct answer.
 Then call handoff_to_agent with agent_name='critic'."""
@@ -173,6 +189,18 @@ SCENARIOS = [
         "kind": "hallucination surface (unanchored)",
         "control": False,
         "teaches": "No tool anywhere returns a rating. Any rating figure is invention.",
+    },
+    {
+        "id": "fabricated_amenity_fee",
+        "name": "Amenity the knowledge graph does not support",
+        "query": "What is the daily fee for the spa at anycompany_lisbon?",
+        "kind": "hallucination surface (domain)",
+        "control": False,
+        "teaches": (
+            "No tool returns amenities, and the knowledge graph records no "
+            "spa for this hotel. Any fee is invention, and the validator can "
+            "reject the spa itself from the graph."
+        ),
     },
 ]
 
@@ -251,6 +279,7 @@ def run_swarm(scenario: dict) -> dict:
         tools=[
             make_answer_reader(executor),
             get_tool_output_log,
+            get_hotel_domain_record,
             record_verdict,
         ],
         callback_handler=None,
@@ -321,6 +350,9 @@ def main() -> int:
     print("Fabrication is rare and stochastic. This run may well show zero on both")
     print("architectures; that is an expected outcome. The three-run aggregate counts")
     print("are in the Measured results table in README.md.")
+
+    seed_domain_fixtures()
+    print("\nSeeded the AnyCompany domain fixtures into the knowledge graph.")
 
     single_runs: list[dict] = []
     swarm_runs: list[dict] = []

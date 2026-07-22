@@ -1,38 +1,28 @@
-import os
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""
-Tool Registry — FAISS semantic search over tools.
+"""Tool Registry: Neo4j vector search over tools.
 
-Default: Amazon Bedrock Nova 2 Multimodal Embeddings (requires AWS credentials).
-Alternative: SentenceTransformer all-MiniLM-L6-v2 (runs locally, no AWS needed).
-
-To use the local model instead, uncomment the SentenceTransformer section below
-and comment out the Bedrock section. Install: pip install sentence-transformers
+Tool descriptions are embedded with Amazon Bedrock Nova 2 Multimodal
+Embeddings and stored on :Tool nodes in the same Neo4j Aura instance as the
+hotel knowledge graph. Selection queries the `tool_description_embeddings`
+vector index; tool_graph.py owns the graph schema and index setup.
 """
+
 import json
-import faiss
+import os
+from typing import Callable, List
+
 import boto3
-from typing import List, Callable
+
+from tool_graph import build_tool_graph, selection_report, vector_search
 
 _client = None
-_index = None
-_tools = []
+_tools_by_name: dict[str, Callable] = {}
 
-# --- Amazon Bedrock Nova 2 Embeddings (default) ---
+# --- Amazon Bedrock Nova 2 Embeddings ---
 MODEL_ID = "amazon.nova-2-multimodal-embeddings-v1:0"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 DIMENSIONS = 1024
-
-# --- Local model alternative (uncomment to use instead of Bedrock) ---
-# from sentence_transformers import SentenceTransformer
-# _local_model = None
-# DIMENSIONS = 384
-# def _embed_local(texts):
-#     global _local_model
-#     if _local_model is None:
-#         _local_model = SentenceTransformer('all-MiniLM-L6-v2')
-#     return _local_model.encode(texts).astype('float32')
 
 
 def _get_client():
@@ -42,9 +32,8 @@ def _get_client():
     return _client
 
 
-def _embed(texts: List[str]) -> list:
+def _embed(texts: List[str]) -> list[list[float]]:
     """Embed texts using Amazon Bedrock Nova 2 Multimodal Embeddings."""
-    import numpy as np
     client = _get_client()
     vectors = []
     for text in texts:
@@ -63,28 +52,28 @@ def _embed(texts: List[str]) -> list:
         )
         result = json.loads(resp["body"].read())
         vectors.append(result["embeddings"][0]["embedding"])
-    return np.array(vectors, dtype="float32")
+    return vectors
 
 
 def build_index(tools: List[Callable]):
-    """Build FAISS index from tool docstrings using Nova 2 embeddings."""
-    global _index, _tools
-    _tools = tools
-
-    texts = [f"{t.__name__}: {t.__doc__}" for t in tools]
-    embeddings = _embed(texts)
-
-    _index = faiss.IndexFlatL2(embeddings.shape[1])
-    _index.add(embeddings)
-
-    print(f"Indexed {len(tools)} tools ({DIMENSIONS} dims, Nova 2 embeddings)")
+    """Build the Neo4j tool graph from tool docstrings using Nova 2 embeddings."""
+    global _tools_by_name
+    _tools_by_name = {t.__name__: t for t in tools}
+    build_tool_graph(tools, _embed)
+    print(f"Indexed {len(tools)} tools ({DIMENSIONS} dims, Nova 2 embeddings, Neo4j)")
 
 
 def search_tools(query: str, top_k: int = 3) -> List[Callable]:
-    """Find most relevant tools for a query."""
-    emb = _embed([query])
-    _, indices = _index.search(emb, top_k)
-    return [_tools[i] for i in indices[0]]
+    """Find most relevant tools for a query via the Neo4j vector index."""
+    emb = _embed([query])[0]
+    hits = vector_search(emb, top_k)
+    return [_tools_by_name[hit["name"]] for hit in hits]
+
+
+def select_tools_with_context(query: str, top_k: int = 3) -> dict:
+    """Vector candidates plus workflow-expanded tools, each with an explanation."""
+    emb = _embed([query])[0]
+    return selection_report(emb, top_k)
 
 
 def swap_tools(agent, new_tools: List[Callable]):
@@ -152,10 +141,14 @@ def usage_delta(agent, before: dict) -> dict:
 
 
 def get_scores(query: str, top_k: int = 10) -> List[dict]:
-    """Get tool scores for debugging."""
-    emb = _embed([query])
-    distances, indices = _index.search(emb, min(top_k, len(_tools)))
+    """Get tool scores for debugging. Scores are cosine similarity in [0, 1]."""
+    emb = _embed([query])[0]
+    hits = vector_search(emb, min(top_k, len(_tools_by_name)))
     return [
-        {"name": _tools[i].__name__, "score": 1 / (1 + d), "doc": _tools[i].__doc__}
-        for i, d in zip(indices[0], distances[0])
+        {
+            "name": hit["name"],
+            "score": hit["score"],
+            "doc": _tools_by_name[hit["name"]].__doc__,
+        }
+        for hit in hits
     ]

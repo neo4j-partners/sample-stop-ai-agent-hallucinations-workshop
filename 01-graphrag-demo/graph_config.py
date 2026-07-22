@@ -24,6 +24,14 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
+from retrieval_contract import (
+    CHUNK_FULLTEXT_INDEX as CHUNK_FULLTEXT_INDEX,
+    CHUNK_VECTOR_INDEX as CHUNK_VECTOR_INDEX,
+    EMBEDDING_DIMENSIONS as EMBEDDING_DIMENSIONS,
+    EMBEDDING_MODEL_ID as EMBEDDING_MODEL_ID,
+    EMBEDDING_PURPOSE as EMBEDDING_PURPOSE,
+)
+
 # ---------------------------------------------------------------------------
 # Neo4j connection
 # ---------------------------------------------------------------------------
