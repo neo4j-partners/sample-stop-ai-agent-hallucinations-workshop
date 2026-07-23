@@ -121,10 +121,6 @@ NOTEBOOKS = (
         REPO_ROOT / "06-agentcore-boto3-demo" / "01_hybrid_retrieval.ipynb",
     ),
     Notebook(
-        "6",
-        REPO_ROOT / "06-agentcore-boto3-demo" / "02_agentcore_walkthrough.ipynb",
-    ),
-    Notebook(
         "7",
         REPO_ROOT
         / "07-agentcore-memory-demo"

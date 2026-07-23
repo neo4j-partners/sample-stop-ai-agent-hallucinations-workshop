@@ -1,8 +1,8 @@
 [< Back to Main README](../README.md)
 
-# Demo 06A: Production Grounded Agent on Amazon Bedrock AgentCore
+# Demo 06: Grounded Hotel Retrieval and Safe Reservations
 
-Take the anti-hallucination techniques from the earlier demos (01-05) into a production shape on [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), [AWS Lambda](https://aws.amazon.com/lambda/), and [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request.
+Take the anti-hallucination techniques from the earlier demos (01-05) into a self-contained agent you run on your own laptop against [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) and [Amazon Bedrock](https://aws.amazon.com/bedrock/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request. The full Amazon Bedrock AgentCore deployment that hosts this same boundary as a managed service is staged in [`deployment-deferred/`](deployment-deferred/) for reference.
 
 [![Python](https://img.shields.io/badge/Python-3.11-green.svg?style=flat)](https://python.org)
 [![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-orange.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/agentcore/)
@@ -12,16 +12,16 @@ Take the anti-hallucination techniques from the earlier demos (01-05) into a pro
 This demo uses [Strands Agents](https://github.com/strands-agents/sdk-python) with [Amazon Bedrock](https://aws.amazon.com/bedrock/). The same boundary applies with other agent frameworks that support AgentCore Runtime.
 
 **At a Glance**
-- **Failure it stops:** carrying the grounded techniques into production without losing them.
+- **Failure it stops:** carrying the grounded techniques into a real action path without losing them.
 - **Neo4j:** Aura holds the hotel graph, the retrieval indexes, and the reservation rule.
-- **AWS:** AgentCore hosts the agent, Lambda performs the one safe action, Bedrock reasons.
-- **You'll build:** a grounded retrieval path plus one protected reservation-request action.
+- **AWS:** Amazon Bedrock reasons over the evidence and embeds the query. AgentCore, Gateway, and Lambda host the same boundary as a managed service in the deferred deployment.
+- **You'll build:** a grounded retrieval path plus one protected reservation-request action, run locally.
 
 ---
 
 ## What This Demo Shows
 
-Demos 01-05 build techniques that reduce hallucination. Demo 06A shows the production shape of two of them:
+Demos 01-05 build techniques that reduce hallucination. Demo 06 shows the production shape of three of them, all runnable from one notebook against your own Aura instance:
 
 | Technique (from demos) | Production shape here |
 |------------------------|-----------------------|
@@ -33,34 +33,40 @@ The retrieval tool accepts only a `query`. The reservation command accepts only 
 
 ---
 
-## Two Notebooks
+## One Notebook
 
-This demo is split by what each notebook can prove, not by workstream.
+`01_hybrid_retrieval.ipynb` runs the full local story end to end against your own Neo4j Aura and Amazon Bedrock. It creates no AWS resources.
 
-| Notebook | Audience | What it proves | AWS resources |
-|----------|----------|----------------|---------------|
-| [`01_hybrid_retrieval.ipynb`](01_hybrid_retrieval.ipynb) | Participant | Hybrid graph retrieval grounds a hero question and forces abstention on an unanswerable one. Runs against your own Neo4j Aura, offline of AWS. | None created |
-| [`02_agentcore_walkthrough.ipynb`](02_agentcore_walkthrough.ipynb) | Facilitator | The pre-deployed Runtime, Gateway, and reservation Lambda reject a 15-guest request with no write, record a corrected request, and correlate by request ID. | None created; invokes an existing deployment |
+| Section | What it proves |
+|---------|----------------|
+| Hybrid retrieval | A hero question is grounded in vector plus full-text evidence and one reviewed Cypher traversal. |
+| Abstention | An availability question the graph cannot answer forces the agent to decline instead of inventing a claim. |
+| Rule rejection | A 15-guest request is rejected with `reason_code=max_guests_exceeded` and no write, because the Neo4j maximum-guests rule caps a request at 10. |
+| Safe write | A corrected request within the limit records one `ReservationRequest` linked by `FOR_HOTEL`, and re-delivering the same `request_id` returns `duplicate=true` with no second node. |
+| Graph inspection | The stored request is read back by its stable `request_id`. |
 
-Both notebooks self-skip their live cells when credentials are absent, so they parse and run cleanly in CI. Neither notebook creates AWS resources. The deployable boundary they exercise is described in [DEPLOYMENT.md](DEPLOYMENT.md).
+Live cells self-skip when credentials are absent, so the notebook parses and runs cleanly in CI. The reservation cells need only your Aura connection; they derive the hero `hotel_id` from the local fixture manifest and never depend on a live retrieval result.
 
 ---
 
 ## Architecture
 
 ```
-Participant path (Notebook 1)
+Local path (Notebook)
   query -> HybridCypherRetriever -> Neo4j Aura -> structured evidence -> grounded local agent
+  reservation payload -> create_reservation_request -> Neo4j Aura (rule check + idempotent write)
+```
 
-Facilitator path (Notebook 2), pre-deployed
+The same boundary, hosted as a managed AWS service, is staged in `deployment-deferred/`:
+
+```
+Deployment (deferred)
   caller (request_id) -> AgentCore Runtime (search_hotel_knowledge, in-process)
                                      |
                                      +-> AgentCore Gateway -> create_reservation_request Lambda -> Neo4j Aura
 ```
 
-- **AgentCore Runtime** hosts `booking_agent.py`. It runs the retrieval tool in-process and discovers exactly one command through the Gateway.
-- **AgentCore Gateway** exposes only `create_reservation_request`, defined by `deployment/gateway_target.json`.
-- **The reservation Lambda** enforces the full closed schema, canonical UUID, strict dates, positive guest count, and the Neo4j maximum-guests rule at the command boundary.
+- **`create_reservation_request`** enforces the full closed schema, canonical UUID, strict dates, positive guest count, and the Neo4j maximum-guests rule at the command boundary. The notebook calls it directly; the deferred Lambda wraps the same function.
 - **Neo4j AuraDB** holds the prepared hotel knowledge graph, the maximum-guests rule, and workshop-owned reservation requests.
 
 ---
@@ -95,14 +101,14 @@ A 15-guest request is rejected with no write because the enabled Neo4j rule caps
 
 ---
 
-## Quick Start (Participant Path)
+## Quick Start
 
 ### Prerequisites
 
 - **[Python](https://python.org/downloads) 3.11+**
 - **[uv](https://docs.astral.sh/uv/)** package manager ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
 - A **Neo4j AuraDB** instance with the prepared Demo 06 graph (see [Neo4j Setup](#neo4j-setup))
-- **Amazon Bedrock access** to Amazon Nova 2 embeddings for the retrieval query
+- **Amazon Bedrock access** for the query embedding (Amazon Nova 2) and the grounded agent
 
 ### Step 1: Install dependencies
 
@@ -122,13 +128,13 @@ NEO4J_PASSWORD=your-password
 NEO4J_DATABASE=neo4j
 ```
 
-### Step 3: Run Notebook 1
+### Step 3: Run the notebook
 
 ```bash
 code 01_hybrid_retrieval.ipynb
 ```
 
-The notebook confirms your Aura connection and prepared indexes, runs the hero question through hybrid retrieval, shows the structured evidence, and demonstrates abstention on a question the graph cannot answer. If Neo4j or Bedrock is not configured, the live cells self-skip and the notebook still runs top to bottom.
+The notebook confirms your Aura connection and prepared indexes, runs the hero question through hybrid retrieval, demonstrates abstention on a question the graph cannot answer, rejects a 15-guest request, records and re-delivers a valid request idempotently, and reads the stored request back. If Neo4j or Bedrock is not configured, the affected live cells self-skip and the notebook still runs top to bottom.
 
 The repository acceptance path runs the same notebook:
 
@@ -136,21 +142,22 @@ The repository acceptance path runs the same notebook:
 python setup/run_notebooks.py --labs 6
 ```
 
-This executes Notebook 1 and parses Notebook 2 without creating AWS resources.
+This executes the notebook without creating AWS resources.
 
 ---
 
-## Facilitator Path (Notebook 2)
+## Deployment (deferred, see `deployment-deferred/`)
 
-`02_agentcore_walkthrough.ipynb` drives an existing deployment. Set `AGENT_RUNTIME_ARN` for the pre-deployed AgentCore Runtime, then walk through:
+The full Amazon Bedrock AgentCore deployment is staged intact in [`deployment-deferred/`](deployment-deferred/) and is not run in this workshop pass. It holds the second facilitator notebook (`02_agentcore_walkthrough.ipynb`), the Runtime entry point (`booking_agent.py`), the Gateway target manifest, the reservation Lambda, the container `Dockerfile`, and the Secrets Manager and IAM boundary described in [`deployment-deferred/DEPLOYMENT.md`](deployment-deferred/DEPLOYMENT.md). See [`deployment-deferred/README.md`](deployment-deferred/README.md) for what is staged and why.
 
-1. One caller-created request ID, reused on retries.
-2. A 15-guest request rejected with no write.
-3. A corrected request within the limit, recorded with a Neo4j `created_at`.
-4. Graph inspection of the resulting `ReservationRequest` and its `FOR_HOTEL` relationship.
-5. Correlation of AgentCore and CloudWatch by the same request ID.
+### Two credentials, two secrets (deferred boundary)
 
-Every live cell self-skips when the Runtime or Neo4j is not configured. The notebook creates no AWS resources; deploying the boundary is a separate facilitator step described in [DEPLOYMENT.md](DEPLOYMENT.md).
+When deployed, the Runtime and command use separate identities and never share a credential:
+
+- **Runtime-read**: reads chunk search indexes and traverses to hotel and amenity data. No write privileges.
+- **Lambda-command**: reads the maximum-guests rule and fixture hotel identity, and creates workshop-owned `ReservationRequest` nodes and `FOR_HOTEL` relationships. Cannot update or delete canonical hotel, chunk, document, amenity, or rule data.
+
+Deployed code reads `NEO4J_READ_SECRET_ID` and `NEO4J_COMMAND_SECRET_ID` from Secrets Manager. Each secret contains `uri`, `username`, `password`, and `database`. The local notebook reads `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`. Passwords, secret values, and full connection strings must never appear in a deployment package, a prompt, or a log.
 
 ---
 
@@ -164,7 +171,7 @@ Every live cell self-skips when the Runtime or Neo4j is not configured. The note
 
 ### Prepare the Demo 06 graph
 
-The retrieval and command paths expect the prepared graph: hotel documents and chunks, the `hotel_chunk_embeddings` and `hotel_chunk_fulltext` indexes, the maximum-guests rule, and the fixture hotel identities in `fixtures/hotel_ids.json`. `graph_setup.py` applies this preparation, and Notebook 1 reports any missing pieces before it runs.
+The retrieval and command paths expect the prepared graph: hotel documents and chunks, the `hotel_chunk_embeddings` and `hotel_chunk_fulltext` indexes, the maximum-guests rule, and the fixture hotel identities in `fixtures/hotel_ids.json`. `graph_setup.py` applies this preparation, and the notebook reports any missing pieces before it runs.
 
 Run the one-time readiness check before an event to confirm every dependency is in place:
 
@@ -174,47 +181,44 @@ python graph_setup.py --check-only
 
 It reads your `NEO4J_*` environment values and reports one corrective action per missing dependency (absent env vars, missing or offline indexes, missing constraints, unresolved fixtures, or the missing rule), exiting non-zero until the graph is ready. Drop `--check-only` to apply the idempotent Demo 06 graph preparation.
 
-### Two credentials, two secrets (deployed boundary)
-
-The deployed Runtime and command use separate identities and never share a credential:
-
-- **Runtime-read**: reads chunk search indexes and traverses to hotel and amenity data. No write privileges.
-- **Lambda-command**: reads the maximum-guests rule and fixture hotel identity, and creates workshop-owned `ReservationRequest` nodes and `FOR_HOTEL` relationships. Cannot update or delete canonical hotel, chunk, document, amenity, or rule data.
-
-Deployed code reads `NEO4J_READ_SECRET_ID` and `NEO4J_COMMAND_SECRET_ID` from Secrets Manager. Each secret contains `uri`, `username`, `password`, and `database`. Local notebooks read `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`. Passwords, secret values, and full connection strings must never appear in a deployment package, a prompt, or a log.
-
 ---
 
 ## File Structure
 
 ```
 06-agentcore-boto3-demo/
-├── 01_hybrid_retrieval.ipynb        # Participant: hybrid retrieval, offline of AWS
-├── 02_agentcore_walkthrough.ipynb   # Facilitator: pre-deployed Runtime + command
+├── 01_hybrid_retrieval.ipynb        # The self-contained local notebook
 ├── CONTRACTS.md                     # Frozen retrieval and command contracts
-├── DEPLOYMENT.md                    # The deployable boundary (Runtime, Gateway, Lambda)
 ├── contracts.py                     # Shared schema and contract helpers
 ├── graph_setup.py                   # Prepare and verify the Demo 06 graph
 ├── hybrid_retrieval.py              # HybridCypherRetriever configuration and tool
-├── reservation_command.py           # Reservation command logic
-├── booking_agent.py                 # AgentCore Runtime entry point (Strands)
-├── agent_requirements.txt           # Runtime dependencies (deployed to AgentCore)
-├── requirements.txt                 # Local dependencies (notebooks)
+├── reservation_command.py           # Reservation command logic (called locally)
+├── requirements.txt                 # Local dependencies (notebook)
+├── conftest.py                      # Keeps the local test run out of deployment-deferred/
 ├── fixtures/
 │   └── hotel_ids.json               # Committed fixture hotel identities
-├── deployment/
-│   └── gateway_target.json          # The single Gateway target manifest
-├── lambda_tools/
-│   └── create_reservation_request/  # The one reservation Lambda
-└── tool_schemas/
-    └── tools.json                   # Tool definitions
+├── tool_schemas/
+│   └── tools.json                   # Tool definitions
+└── deployment-deferred/             # Staged AWS deployment, not run in this pass
+    ├── README.md                    # What is staged here and why
+    ├── 02_agentcore_walkthrough.ipynb  # Facilitator: pre-deployed Runtime + command
+    ├── DEPLOYMENT.md                # The deployable boundary (Runtime, Gateway, Lambda)
+    ├── booking_agent.py             # AgentCore Runtime entry point (Strands)
+    ├── Dockerfile                   # Runtime container image
+    ├── .dockerignore
+    ├── agent_requirements.txt       # Runtime dependencies (deployed to AgentCore)
+    ├── deployment/
+    │   └── gateway_target.json      # The single Gateway target manifest
+    ├── lambda_tools/
+    │   └── create_reservation_request/  # The one reservation Lambda
+    └── test_runtime_integration.py  # Deployment tests (run in the deployment env)
 ```
 
 ---
 
 ## Cleanup
 
-Notebooks 1 and 2 create no AWS resources, so there is nothing to clean up from running them. If a facilitator deployed the AgentCore boundary, tear it down with the workshop cleanup in [Demo 10](../10-cleanup/).
+The notebook creates no AWS resources, so there is nothing to clean up from running it. If a facilitator later deploys the staged AgentCore boundary, tear it down with the workshop cleanup in [Demo 10](../10-cleanup/).
 
 > Skip cleanup if you are using an AWS-provided workshop account. It is cleaned up automatically.
 

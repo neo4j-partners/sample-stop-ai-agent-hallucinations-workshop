@@ -211,6 +211,7 @@ class ReservationCommandTests(unittest.TestCase):
     def test_packaged_lambda_entrypoint_resolves_shared_handler(self):
         path = (
             Path(__file__).parent
+            / "deployment-deferred"
             / "lambda_tools"
             / "create_reservation_request"
             / "lambda_function.py"

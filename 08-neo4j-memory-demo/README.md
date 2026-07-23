@@ -40,13 +40,23 @@ Multi-tenant mode makes the library reject supported writes that omit a
 
 ## Configuration and preflight
 
-Configure these values in the environment or a repository `.env` file:
+This module uses the same Neo4j Aura instance and credentials as Module 1. If
+you created the repo-root `.env` described in the top-level
+[README](../README.md#neo4j-setup), this module needs no extra setup. The
+required values are:
 
 - `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`
 - `NEO4J_DATABASE` when the target database is not `neo4j`
 - `AWS_REGION`, defaulting to `us-east-1`
 - AWS credentials permitted to invoke
   `amazon.titan-embed-text-v2:0`
+
+`load_config` reads `08-neo4j-memory-demo/.env` first, then the repo-root
+`.env`, and values already present in the environment win over both. If you
+placed the Module 1 credentials inside `01-graphrag-demo/.env`, copy them to
+the repo root or into this folder, or export them into your shell, because this
+module does not read another demo's folder. Without any Neo4j credentials the
+notebook and scripts skip every live cell cleanly.
 
 Module 1 must have created exactly one Hotel named
 `AnyCompany Cairo Nile View`. The memory indexes use Titan Text Embeddings V2
@@ -67,14 +77,34 @@ uv run --with-requirements 08-neo4j-memory-demo/requirements.txt \
 # Live memory/index smoke test
 uv run --with-requirements 08-neo4j-memory-demo/requirements.txt \
   python 08-neo4j-memory-demo/smoke_test.py
+```
 
-# Remove every Demo 08 run without changing Hotel nodes
+To reset the demo afterward, see [Cleanup](#cleanup) below.
+
+Without Neo4j and AWS credentials the notebook and scripts print clear skip
+messages, which keeps repository validation credential-free.
+
+## Cleanup
+
+Each notebook run writes about ten memory records under a fresh run ID, so run
+the cleanup script whenever you want to reset the demo:
+
+```bash
 uv run --with-requirements 08-neo4j-memory-demo/requirements.txt \
   python 08-neo4j-memory-demo/cleanup_memory.py
 ```
 
-Without Neo4j and AWS credentials the notebook and scripts print clear skip
-messages, which keeps repository validation credential-free.
+- **What it removes:** conversations, messages, and users in the `demo08-`
+  namespace; the workshop-owned `ABOUT_HOTEL` links; and any orphaned
+  preferences tagged `neo4j-ftw-demo-8`. The prefix sweep also catches records
+  from a run that failed before its tagging step.
+- **What it never touches:** Hotel nodes, the hotel-chunk indexes, and other
+  modules' data. The script asserts the Hotel count is unchanged and fails
+  loudly if it ever moves. The library-managed memory vector indexes are left
+  in place because they are shared infrastructure, cost nothing while empty,
+  and the smoke test checks them.
+- **What it needs:** live Neo4j credentials only. It uses no AWS access, and it
+  prints a skip message and exits 0 when Neo4j is not configured.
 
 ## Files
 
