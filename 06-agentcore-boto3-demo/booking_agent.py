@@ -1,168 +1,233 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Hotel Booking Agent — AgentCore Runtime entry point.
+"""Demo 06 AgentCore Runtime entry point.
 
-Connects to AgentCore Gateway via MCP (Model Context Protocol) to access tools.
-The Gateway handles semantic tool routing — the agent does not define tools inline.
+The Runtime exposes one in-process, read-only retrieval tool and discovers one
+reservation-request command from its pre-provisioned AgentCore Gateway. This
+module defines no AWS resource creation or deployment behavior.
 """
 
+from __future__ import annotations
+
+import json
+import logging
 import os
-from datetime import datetime
+from typing import Any
+from uuid import UUID
 
-import boto3
 from bedrock_agentcore import BedrockAgentCoreApp
-from strands import Agent
-from strands.models import BedrockModel
-from strands.tools.mcp.mcp_client import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
-
-# Model configuration — Amazon Bedrock (default, requires AWS credentials)
-# Strands Agents uses Bedrock by default. No extra import needed.
-#
-# To use a different provider (e.g., OpenAI), install the extra and configure:
-#   pip install "strands-agents[openai]"
-#   from strands.models.openai import OpenAIModel
-#   model = OpenAIModel(model_id="gpt-4o-mini", client_args={"api_key": api_key})
-#   (store the API key in AWS Secrets Manager and retrieve it at runtime)
-#
-# See all providers: https://strandsagents.com/docs/user-guide/concepts/model-providers/
-
-# --- Configuration from CDK environment variables ---
-
-GATEWAY_URL = os.environ["GATEWAY_URL"]
-
-_region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
-
-
-# --- Hard guardrails (hooks — cannot be bypassed by the LLM) ---
-
+from strands import Agent, tool
 from strands.hooks.events import BeforeToolCallEvent
 from strands.hooks.registry import HookProvider, HookRegistry
+from strands.models import BedrockModel
+from strands.tools.mcp.mcp_client import MCPClient
+
+from hybrid_retrieval import (
+    GROUNDING_INSTRUCTIONS,
+    search_hotel_knowledge as _search_hotel_knowledge,
+)
+
+LOGGER = logging.getLogger(__name__)
+
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+GATEWAY_TARGET_NAME = "demo06-reservation-request"
+GATEWAY_SCHEMA_TOOL = "create_reservation_request"
+GATEWAY_COMMAND_TOOL = f"{GATEWAY_TARGET_NAME}___{GATEWAY_SCHEMA_TOOL}"
+
+SYSTEM_PROMPT = f"""
+You are a grounded hotel-information and reservation-request assistant.
+
+You have exactly two logical tools:
+- search_hotel_knowledge searches hotel evidence and returns a stable hotel ID.
+- {GATEWAY_COMMAND_TOOL} is the Gateway form of create_reservation_request. It
+  validates policy and records a request. It does not reserve inventory, take
+  payment, or confirm a booking.
+
+Rules:
+- Use search_hotel_knowledge before creating any reservation request.
+- Pass only a stable hotel ID returned by that search to the command.
+- Use the caller-provided request ID exactly. Never invent or alter one.
+- Never silently reduce the guest count or change dates. Make every policy
+  rejection visible and ask the caller for a corrected request.
+- Never claim that availability is guaranteed or that a booking is complete.
+
+{GROUNDING_INSTRUCTIONS}
+""".strip()
+
+app = BedrockAgentCoreApp()
 
 
-class BookingGuardrailsHook(HookProvider):
-    """Hard guardrails enforced at the framework level.
+class ReservationRequestGuard(HookProvider):
+    """Bind reservation tool calls to the caller's correlation UUID."""
 
-    Only critical business rules that must NEVER be bypassed:
-    - Payment before confirmation (financial integrity)
-    - Cancellation window (contractual obligation)
-
-    All other rules are handled by validate_booking_rules as steering —
-    the agent self-corrects based on STEER messages from DynamoDB.
-    """
-
-    def __init__(self):
-        self._dynamodb = boto3.resource("dynamodb", region_name=_region)
-        self._bookings = self._dynamodb.Table(os.environ["BOOKINGS_TABLE"])
+    def __init__(self, request_id: str | None) -> None:
+        self.request_id = request_id
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(BeforeToolCallEvent, self._validate)
 
     def _validate(self, event: BeforeToolCallEvent) -> None:
-        tool_name = event.tool_use["name"]
-        params = event.tool_use.get("input", {})
-
-        if "confirm" in tool_name:
-            self._validate_confirmation(event, params)
-        elif "cancel" in tool_name:
-            self._validate_cancellation(event, params)
-
-    def _validate_confirmation(self, event, params):
-        booking_id = params.get("booking_id", "")
-        if not booking_id:
-            event.cancel_tool = "BLOCKED: booking_id is required."
+        tool_use = event.tool_use
+        if tool_use.get("name") != GATEWAY_COMMAND_TOOL:
             return
-
-        booking = self._bookings.get_item(Key={"booking_id": booking_id}).get("Item")
-        if not booking:
-            event.cancel_tool = f"BLOCKED: Booking '{booking_id}' not found."
-            return
-
-        if booking["status"] != "PAID":
+        parameters = tool_use.get("input") or {}
+        if self.request_id is None:
             event.cancel_tool = (
-                f"BLOCKED: Booking is '{booking['status']}'. "
-                "Payment must be processed before confirmation. "
-                "Ask the user if they want to proceed with payment."
+                "BLOCKED: A caller-provided request_id is required for the "
+                "reservation command."
+            )
+        elif parameters.get("request_id") != self.request_id:
+            event.cancel_tool = (
+                "BLOCKED: The reservation command must use the caller-provided "
+                "request_id unchanged."
             )
 
-    def _validate_cancellation(self, event, params):
-        booking_id = params.get("booking_id", "")
-        if not booking_id:
-            event.cancel_tool = "BLOCKED: booking_id is required."
-            return
 
-        booking = self._bookings.get_item(Key={"booking_id": booking_id}).get("Item")
-        if not booking:
-            event.cancel_tool = f"BLOCKED: Booking '{booking_id}' not found."
-            return
+@tool
+def search_hotel_knowledge(query: str) -> str:
+    """Search bounded hotel evidence and graph-enriched facts.
 
-        if booking["status"] == "CANCELLED":
-            event.cancel_tool = "BLOCKED: Booking is already cancelled."
-            return
+    Use this before answering hotel questions or creating a reservation
+    request. The returned hotel_id is the only hotel identity accepted by the
+    reservation command. Results do not represent live room availability.
 
-        try:
-            ci = datetime.fromisoformat(booking["check_in"])
-            if (ci - datetime.now()).days < 2:
-                event.cancel_tool = (
-                    "BLOCKED: Cannot cancel within 48 hours of check-in. "
-                    "Inform the user to contact support for exceptions."
-                )
-        except (ValueError, TypeError):
-            pass
+    Args:
+        query: Natural-language hotel question.
+
+    Returns:
+        JSON containing at most five grounded hotel evidence records.
+    """
+    return json.dumps(_search_hotel_knowledge(query), ensure_ascii=False)
 
 
-# --- Agent setup ---
+def _runtime_region() -> str:
+    return os.environ.get(
+        "AWS_REGION",
+        os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+    )
 
-SYSTEM_PROMPT = (
-    "You are a hotel booking assistant. Help users search, book, pay, "
-    "confirm, and cancel hotel reservations.\n\n"
-    "RULES:\n"
-    "- ALWAYS call validate_booking_rules BEFORE book_hotel, confirm_booking, or cancel_booking.\n"
-    "- If validation returns FAIL with a STEER instruction, follow the STEER guidance exactly: "
-    "fix the parameters, retry the action, and always tell the user what was not possible AND "
-    "what you did instead. Pattern: 'X is not available, but Y is. I adjusted to Y.'\n"
-    "- If a tool call is BLOCKED by the system, inform the user — you cannot override it.\n"
-    "- For payment, ask the user if they want to proceed (simulated).\n"
-    "- Follow the flow: search -> validate -> book -> pay -> validate -> confirm."
-)
 
-app = BedrockAgentCoreApp()
+def _gateway_url() -> str:
+    value = os.environ.get("GATEWAY_URL", "").strip()
+    if not value:
+        raise ValueError("GATEWAY_URL is required for the deployed Runtime")
+    return value
+
+
+def _request_id(payload: dict[str, Any]) -> str | None:
+    value = payload.get("request_id")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("request_id must be a UUID string")
+    try:
+        parsed = UUID(value)
+    except ValueError as error:
+        raise ValueError("request_id must be a valid UUID") from error
+    if str(parsed) != value:
+        raise ValueError("request_id must use canonical UUID format")
+    return str(parsed)
+
+
+def _prompt(payload: str | dict[str, Any]) -> tuple[str, str | None]:
+    if isinstance(payload, str):
+        prompt = payload.strip()
+        request_id = None
+    elif isinstance(payload, dict):
+        raw_prompt = payload.get("prompt")
+        prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
+        request_id = _request_id(payload)
+    else:
+        raise ValueError("payload must be a prompt string or object")
+
+    if not prompt:
+        raise ValueError("payload must include a non-empty prompt")
+    return prompt, request_id
+
+
+def _tool_name(gateway_tool: Any) -> str | None:
+    return getattr(
+        gateway_tool,
+        "tool_name",
+        getattr(gateway_tool, "name", None),
+    )
+
+
+def _validated_command_tools(gateway_client: MCPClient) -> list[Any]:
+    tools = list(gateway_client.list_tools_sync())
+    names = [_tool_name(candidate) for candidate in tools]
+    if names != [GATEWAY_COMMAND_TOOL]:
+        raise RuntimeError(
+            f"Gateway must expose only {GATEWAY_COMMAND_TOOL}; "
+            f"discovered {names!r}"
+        )
+    return tools
+
+
+def _tools_used(result: Any) -> list[str]:
+    metrics = getattr(result, "metrics", None)
+    tool_metrics = getattr(metrics, "tool_metrics", None)
+    return list(tool_metrics) if isinstance(tool_metrics, dict) else []
 
 
 @app.entrypoint
-def invoke(payload, context=None):
-    """Entry point for AgentCore Runtime invocations."""
-    model = BedrockModel(region_name=_region)
-    hooks = [BookingGuardrailsHook()]
+def invoke(
+    payload: str | dict[str, Any],
+    context: Any | None = None,
+) -> dict[str, Any]:
+    """Handle one isolated Runtime invocation.
 
-    mcp_client = MCPClient(lambda: streamablehttp_client(GATEWAY_URL))
+    ``request_id`` is optional for retrieval-only questions and required by the
+    Gateway command schema when the agent creates a reservation request.
+    """
+    del context
+    prompt, request_id = _prompt(payload)
+    correlation_id = request_id or "retrieval-only"
+    LOGGER.info("runtime_invocation_started request_id=%s", correlation_id)
 
-    with mcp_client:
-        tools = mcp_client.list_tools_sync()
-        agent = Agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT, hooks=hooks)
+    gateway_client = MCPClient(
+        lambda: streamablehttp_client(_gateway_url()),
+    )
+    try:
+        with gateway_client:
+            command_tools = _validated_command_tools(gateway_client)
+            model = BedrockModel(
+                model_id=os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
+                region_name=_runtime_region(),
+                temperature=0,
+            )
+            agent = Agent(
+                model=model,
+                tools=[search_hotel_knowledge, *command_tools],
+                system_prompt=SYSTEM_PROMPT,
+                hooks=[ReservationRequestGuard(request_id)],
+            )
+            caller_context = (
+                f"\n\nCaller request ID: {request_id}"
+                if request_id is not None
+                else ""
+            )
+            result = agent(f"{prompt}{caller_context}")
+    except Exception as error:
+        LOGGER.error(
+            "runtime_invocation_failed request_id=%s error_type=%s",
+            correlation_id,
+            type(error).__name__,
+        )
+        raise
 
-        prompt = payload if isinstance(payload, str) else payload.get("prompt", "")
-        result = agent(prompt)
-
-        # Extract tool calls from Strands Agent metrics
-        # result.metrics.tool_metrics is a dict where keys are tool names
-        tools_used = []
-        if hasattr(result, 'metrics') and hasattr(result.metrics, 'tool_metrics'):
-            tool_metrics = result.metrics.tool_metrics
-            tools_used = list(tool_metrics.keys())
-
-            # Log for debugging - verify MCP Gateway tools are tracked
-            app.logger.info(f"Tool metrics found: {len(tools_used)} tools")
-            for tool_name, metrics in tool_metrics.items():
-                app.logger.info(f"  Tool: {tool_name}, Calls: {metrics.call_count if hasattr(metrics, 'call_count') else 'unknown'}")
-        else:
-            app.logger.warning("No tool metrics found in result")
-
-        # Return response with tool usage metadata
-        return {
-            "response": str(result),
-            "tools_used": tools_used
-        }
+    tools_used = _tools_used(result)
+    LOGGER.info(
+        "runtime_invocation_completed request_id=%s tools_used=%s",
+        correlation_id,
+        ",".join(tools_used) or "none",
+    )
+    return {
+        "response": str(result),
+        "request_id": request_id,
+        "tools_used": tools_used,
+    }
 
 
 if __name__ == "__main__":

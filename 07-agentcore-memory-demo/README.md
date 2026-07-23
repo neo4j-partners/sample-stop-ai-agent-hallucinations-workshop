@@ -2,13 +2,26 @@
 
 Deploy AgentCore agent with long-term memory that recalls user preferences across sessions.
 
+> **Optional managed-memory reference.** This module is not part of the core
+> workshop path. It layers AgentCore Memory onto a pre-provisioned booking
+> agent deployment and teaches one lesson: cross-session recall with a managed
+> memory service. It does not create the booking backend it connects to. The
+> core path (Demo 06A) uses a simplified single-reservation-Lambda
+> architecture, so the multi-table booking deployment this reference reuses is
+> a pre-provisioned dependency rather than part of the current core build.
+> Module 8 runs independently.
+
 ## Prerequisites
 
-**Module 6 must be completed first.** This module reuses:
+**A pre-provisioned booking agent deployment must already exist.** This module
+does not deploy it; it connects to and reuses:
 - AgentCore Gateway (`HotelBookingGateway`)
-- Lambda tools (8 booking + graph functions)
-- DynamoDB tables (Hotels, Bookings, SteeringRules)
+- The gateway's tool Lambdas
+- The backing DynamoDB tables
 - IAM role (`workshop-AgentCoreExecutionRole`)
+
+The core workshop path does not create this deployment. Run this reference only
+in an environment where it has been provisioned separately.
 
 ## What This Module Does
 
@@ -19,7 +32,7 @@ Deploy AgentCore agent with long-term memory that recalls user preferences acros
 2. **Deploys a second agent** with `memory_mode="STM_AND_LTM"`:
    - Code: `booking_agent_with_memory.py`
    - Memory integration via `AgentCoreMemorySessionManager`
-   - Same infrastructure as Module 6 (Gateway + Lambdas)
+   - Connects to the pre-provisioned booking deployment (Gateway + Lambdas)
 
 3. **Tests cross-session memory recall**:
    - **Session A:** User shares name and preferences
@@ -36,9 +49,9 @@ Deploy AgentCore agent with long-term memory that recalls user preferences acros
 | `test_memory_check.py` | Offline tests for the readiness check |
 | `agent_requirements.txt` | Python dependencies (strands-agents, bedrock-agentcore-starter-toolkit) |
 
-## Key Differences from Module 6
+## Key Differences: Baseline Agent vs Memory-Enabled Agent
 
-| Module 6 | Module 7 |
+| Baseline booking agent | Memory-enabled agent (this module) |
 |----------|----------|
 | Runtime memory only (ephemeral) | AgentCore Memory with `STM_AND_LTM` |
 | No Memory resource | AgentCore Memory with strategies |
@@ -49,6 +62,8 @@ Deploy AgentCore agent with long-term memory that recalls user preferences acros
 - **Runtime memory** (Module 6): Temporary conversation buffer maintained by Strands Agent. Lost when session ends.
 - **STM (Short-Term Memory)**: Session-scoped memory managed by AgentCore. Lost when session ends.
 - **LTM (Long-Term Memory)**: Persistent memory managed by AgentCore. Extracts strategies asynchronously and recalls across sessions.
+
+**About the extraction wait:** LTM extraction is a managed background pipeline. After a session's messages are stored, AgentCore analyzes them asynchronously and writes fact and preference records into the actor's namespaces, which usually takes tens of seconds to a few minutes. A fact from Session A is not recallable in Session B until that pipeline completes, so the notebook polls for actual extracted records via `memory_check.py` instead of sleeping for a guessed duration.
 
 ## How Memory Works
 
@@ -94,7 +109,7 @@ the actor's LTM instead of continuing the previous session's STM.
 ## Run the Demo
 
 Open `deploy_memory_agent.ipynb` and execute all cells. The notebook:
-1. Recovers Module 6 resources (Gateway, IAM role)
+1. Connects to the pre-provisioned booking deployment (Gateway, IAM role)
 2. Creates AgentCore Memory resource with strategies
 3. Deploys memory-enabled agent with `memory_mode="STM_AND_LTM"`
 4. Tests STM (same session)
@@ -120,6 +135,14 @@ Agent: Yes, I remember you! Your name is Alex.
 User: Find me a hotel based on my preferences
 Agent: Based on your preference for 4-star hotels in Paris, I recommend...
 ```
+
+## Next Module: Inspectable Neo4j Memory (Module 8)
+
+AgentCore Memory is the managed memory option: AWS runs extraction, storage, and retrieval, and there is no memory infrastructure to operate. The trade is opacity and propagation delay. You cannot inspect why a record was extracted, and a fact only becomes recallable after the background pipeline finishes.
+
+[Module 8](../08-neo4j-memory-demo/) is the inspectable alternative: agent memory stored in the same Neo4j graph as the hotel domain data. Its explicit preference is queryable, carries provenance back to its source message, links to the real `Hotel`, and is recalled through an actor-anchored read. The application remains responsible for authenticating actors and authorizing session IDs. Writes are visible immediately, with no asynchronous extraction wait.
+
+**When to choose which:** choose AgentCore Memory when you want managed extraction with nothing to operate and can accept the propagation delay; choose Neo4j graph memory when you need explicit writes, immediate visibility, and a memory store you can inspect, query, and connect to your domain graph.
 
 ## Cleanup
 

@@ -17,6 +17,10 @@
 #     "agent-control-sdk>=0.0.1",
 #     "pyyaml>=6.0",
 #     "bedrock-agentcore-starter-toolkit",
+#     # Demo 08 (Neo4j graph memory; the notebook self-skips when unconfigured)
+#     "neo4j-agent-memory[bedrock]==0.5.0",
+#     # Demo 09 (Neo4j MCP client; the notebook self-skips when unconfigured)
+#     "mcp>=1.8.0",
 # ]
 # ///
 """Execute the workshop notebooks without modifying their source files.
@@ -28,8 +32,9 @@ Usage:
     uv run setup/run_notebooks.py
     uv run setup/run_notebooks.py --labs 1
     uv run setup/run_notebooks.py --labs 2-5
-    uv run setup/run_notebooks.py --labs 6,7 --include-deploy
-    uv run setup/run_notebooks.py --labs 8 --include-cleanup
+    uv run setup/run_notebooks.py --labs 6
+    uv run setup/run_notebooks.py --labs 7 --include-deploy
+    uv run setup/run_notebooks.py --labs 10 --include-cleanup
     uv run setup/run_notebooks.py --keep-output
 """
 
@@ -113,8 +118,11 @@ NOTEBOOKS = (
     ),
     Notebook(
         "6",
-        REPO_ROOT / "06-agentcore-boto3-demo" / "deploy_agentcore.ipynb",
-        deploys_resources=True,
+        REPO_ROOT / "06-agentcore-boto3-demo" / "01_hybrid_retrieval.ipynb",
+    ),
+    Notebook(
+        "6",
+        REPO_ROOT / "06-agentcore-boto3-demo" / "02_agentcore_walkthrough.ipynb",
     ),
     Notebook(
         "7",
@@ -125,7 +133,15 @@ NOTEBOOKS = (
     ),
     Notebook(
         "8",
-        REPO_ROOT / "08-cleanup" / "cleanup.ipynb",
+        REPO_ROOT / "08-neo4j-memory-demo" / "inspectable_memory.ipynb",
+    ),
+    Notebook(
+        "9",
+        REPO_ROOT / "09-neo4j-mcp-demo" / "mcp_text2cypher.ipynb",
+    ),
+    Notebook(
+        "10",
+        REPO_ROOT / "10-cleanup" / "cleanup.ipynb",
         deletes_resources=True,
     ),
 )
@@ -416,12 +432,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-deploy",
         action="store_true",
-        help="Run labs 6 and 7, which create or update AWS resources.",
+        help="Run lab 7, which creates or updates AWS resources.",
     )
     parser.add_argument(
         "--include-cleanup",
         action="store_true",
-        help="Run lab 8, which deletes tagged AWS resources.",
+        help="Run lab 10, which deletes tagged AWS resources.",
     )
     parser.add_argument(
         "--timeout",

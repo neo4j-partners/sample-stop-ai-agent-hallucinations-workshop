@@ -19,7 +19,7 @@ Run with::
 
     python -m unittest discover -s 05-steering-demo -v
 
-The sibling import mirrors ``08-cleanup/test_workshop_cleanup.py``: the module
+The sibling import mirrors ``10-cleanup/test_workshop_cleanup.py``: the module
 under test is imported by bare name, relying on unittest discovery (or pytest's
 rootdir insertion) to place the test's own directory on ``sys.path``.
 """

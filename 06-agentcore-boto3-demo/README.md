@@ -1,68 +1,102 @@
 [< Back to Main README](../README.md)
 
-# Production-Ready Booking Agent on Amazon Bedrock AgentCore (boto3 + Notebook)
+# Demo 06A: Production Grounded Agent on Amazon Bedrock AgentCore
 
-Deploy all anti-hallucination techniques from the previous demos in this series (01-05) to production using [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), [AWS Lambda](https://aws.amazon.com/lambda/), and [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) — driven entirely from a single Jupyter notebook with boto3. No CDK required.
+Take the anti-hallucination techniques from the earlier demos (01-05) into a production shape on [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/), [AWS Lambda](https://aws.amazon.com/lambda/), and [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request.
 
 [![Python](https://img.shields.io/badge/Python-3.11-green.svg?style=flat)](https://python.org)
 [![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-orange.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/agentcore/)
-[![DynamoDB](https://img.shields.io/badge/DynamoDB-tables-orange.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/dynamodb/)
 [![Lambda](https://img.shields.io/badge/AWS-Lambda-orange.svg?style=flat&logo=aws-lambda)](https://aws.amazon.com/lambda/)
 [![Neo4j](https://img.shields.io/badge/Neo4j-AuraDB-blue.svg?style=flat)](https://neo4j.com/cloud/aura-free/)
 
-This demo uses [Strands Agents](https://github.com/strands-agents/sdk-python) with [Amazon Bedrock](https://aws.amazon.com/bedrock/). Similar patterns apply with LangGraph, AutoGen, or other agent frameworks that support AgentCore Runtime.
+This demo uses [Strands Agents](https://github.com/strands-agents/sdk-python) with [Amazon Bedrock](https://aws.amazon.com/bedrock/). The same boundary applies with other agent frameworks that support AgentCore Runtime.
 
 ---
 
 ## What This Demo Shows
 
-Demos 01-05 demonstrate techniques that significantly reduce hallucinations. This demo takes those techniques to production:
+Demos 01-05 build techniques that reduce hallucination. Demo 06A shows the production shape of two of them:
 
-| Technique (from demos) | Production implementation |
-|------------------------|--------------------------|
-| **Semantic tool selection** (demo 02) | [AgentCore Gateway](https://aws.amazon.com/bedrock/agentcore/) with MCP (Model Context Protocol) semantic routing — no custom FAISS index needed |
-| **Multi-agent validation** (demo 03) | `validate_booking_rules` tool backed by [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) — same safety, lower latency |
-| **Neurosymbolic guardrails** (demo 04) | Steering rules in [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) — change rules without redeploying the agent |
-| **Agent Control steering** (demo 05) | STEER messages in DynamoDB rules — agent self-corrects instead of failing |
-| **Graph-RAG** (demo 01) | [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) with a `query_knowledge_graph` [AWS Lambda](https://aws.amazon.com/lambda/) (optional, auto-detected) |
+| Technique (from demos) | Production shape here |
+|------------------------|-----------------------|
+| **Graph-RAG** (demo 01) | A fixed `HybridCypherRetriever` over Neo4j: vector index plus full-text index, one reviewed Cypher traversal, structured evidence the agent must cite |
+| **Grounded abstention** (demos 02-04) | The agent answers only from returned evidence and abstains when the graph does not support a claim, including live availability |
+| **Guardrails that cannot be argued away** (demos 04-05) | One idempotent reservation command enforces a Neo4j guest-limit rule at the data boundary, not in the prompt |
 
----
-
-## Workshop vs. Self-Paced
-
-This demo adapts to your environment automatically.
-
-**At an AWS event:** Neo4j runs on the Code Editor EC2. The notebook detects the private IP, Security Group, and Neo4j password secret ARN from CloudFormation outputs — no manual configuration needed.
-
-**Self-paced:** Set `NEO4J_HOST` manually in the notebook's configuration cell to your own Neo4j instance (AuraDB URI, local Docker, etc.). If no Neo4j is configured, the notebook deploys without the graph query tool — the booking agent still works fully.
-
-See [Neo4j Setup (self-paced)](#neo4j-setup-self-paced) for step-by-step instructions.
+The retrieval tool accepts only a `query`. The reservation command accepts only `request_id`, `hotel_id`, `check_in`, `check_out`, and `guests`. Callers cannot pick a retriever, a ranker, a weight, a result count, or an actor identity. The frozen contracts are documented in [CONTRACTS.md](CONTRACTS.md).
 
 ---
 
-## What Gets Deployed
+## Two Notebooks
 
-| Component | AWS Service | Purpose |
-|-----------|-------------|---------|
-| Data layer | [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) (3 tables) | Hotels catalog, reservations, steering rules |
-| Booking tools | [AWS Lambda](https://aws.amazon.com/lambda/) (7 functions) | search, book, pay, confirm, cancel, validate |
-| Graph query tool | [AWS Lambda](https://aws.amazon.com/lambda/) (1 function, VPC) | Cypher queries to Neo4j knowledge graph (optional) |
-| Tool routing | [AgentCore Gateway](https://aws.amazon.com/bedrock/agentcore/) (MCP) | Semantic tool discovery and invocation |
-| Agent | [AgentCore Runtime](https://aws.amazon.com/bedrock/agentcore/) | Hosts the Strands agent with Amazon Bedrock |
-| Guardrails | Hooks + DynamoDB rules | Hard blocks (hooks) + soft steering (STEER messages) |
+This demo is split by what each notebook can prove, not by workstream.
+
+| Notebook | Audience | What it proves | AWS resources |
+|----------|----------|----------------|---------------|
+| [`01_hybrid_retrieval.ipynb`](01_hybrid_retrieval.ipynb) | Participant | Hybrid graph retrieval grounds a hero question and forces abstention on an unanswerable one. Runs against your own Neo4j Aura, offline of AWS. | None created |
+| [`02_agentcore_walkthrough.ipynb`](02_agentcore_walkthrough.ipynb) | Facilitator | The pre-deployed Runtime, Gateway, and reservation Lambda reject a 15-guest request with no write, record a corrected request, and correlate by request ID. | None created; invokes an existing deployment |
+
+Both notebooks self-skip their live cells when credentials are absent, so they parse and run cleanly in CI. Neither notebook creates AWS resources. The deployable boundary they exercise is described in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
-## Quick Start
+## Architecture
+
+```
+Participant path (Notebook 1)
+  query -> HybridCypherRetriever -> Neo4j Aura -> structured evidence -> grounded local agent
+
+Facilitator path (Notebook 2), pre-deployed
+  caller (request_id) -> AgentCore Runtime (search_hotel_knowledge, in-process)
+                                     |
+                                     +-> AgentCore Gateway -> create_reservation_request Lambda -> Neo4j Aura
+```
+
+- **AgentCore Runtime** hosts `booking_agent.py`. It runs the retrieval tool in-process and discovers exactly one command through the Gateway.
+- **AgentCore Gateway** exposes only `create_reservation_request`, defined by `deployment/gateway_target.json`.
+- **The reservation Lambda** enforces the full closed schema, canonical UUID, strict dates, positive guest count, and the Neo4j maximum-guests rule at the command boundary.
+- **Neo4j AuraDB** holds the prepared hotel knowledge graph, the maximum-guests rule, and workshop-owned reservation requests.
+
+---
+
+## The Hybrid Retriever
+
+The retrieval tool always uses the same configuration. Callers cannot change it:
+
+- `HybridCypherRetriever` from `neo4j-graphrag`
+- vector index `hotel_chunk_embeddings` and full-text index `hotel_chunk_fulltext`
+- Amazon Nova 2 embeddings, 1,024 dimensions, `GENERIC_INDEX` purpose
+- explicit `NAIVE` fusion with `top_k=5`
+- one reviewed, parameterized Cypher traversal from chunk to hotel and amenity
+
+Each result returns chunk evidence, the hybrid score, the query terms found verbatim in that evidence, and hotel facts (ID, name, address, guest rating, amenities). Missing facts come back as null or an empty list. Hotel IDs are null for non-fixture hotels, so those hotels cannot be sent to the reservation command. The retriever never claims live inventory or guaranteed availability, which is why the agent abstains on availability questions.
+
+---
+
+## The Reservation Command
+
+The command is idempotent by a caller-created `request_id` UUID. The same ID is reused on retries.
+
+| Outcome | `status` | `reason_code` | Write behavior |
+|---------|----------|---------------|----------------|
+| Accepted | `accepted` | omitted | One request plus one `FOR_HOTEL` relationship |
+| Duplicate delivery | `accepted` | omitted | Returns the existing request with `duplicate=true` |
+| Policy rejection | `rejected` | `max_guests_exceeded` | No write |
+| Unknown hotel | `rejected` | `unknown_hotel` | No write |
+| Invalid dates | `rejected` | `invalid_dates` | No write |
+
+A 15-guest request is rejected with no write because the enabled Neo4j rule caps a request at 10 guests. The correction is a new command from the caller, not a silent adjustment inside the model. Reusing a request ID with different input returns `service_error` and never changes the stored request.
+
+---
+
+## Quick Start (Participant Path)
 
 ### Prerequisites
 
-Before starting, make sure you have:
-
-- **[Python](https://python.org/downloads) 3.11+** installed
+- **[Python](https://python.org/downloads) 3.11+**
 - **[uv](https://docs.astral.sh/uv/)** package manager ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
-- **[AWS CLI](https://aws.amazon.com/cli/)** installed and configured with credentials for your account
-- **Amazon Bedrock access** — enable `us.anthropic.claude-sonnet-5` (or equivalent) in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess)
+- A **Neo4j AuraDB** instance with the prepared Demo 06 graph (see [Neo4j Setup](#neo4j-setup))
+- **Amazon Bedrock access** to Amazon Nova 2 embeddings for the retrieval query
 
 ### Step 1: Install dependencies
 
@@ -71,116 +105,77 @@ cd 06-agentcore-boto3-demo
 uv venv && uv pip install -r requirements.txt
 ```
 
-### Step 2: Open and run the deployment notebook
+### Step 2: Configure your Neo4j connection
+
+Set these in your environment or `.env`:
 
 ```bash
-# Open in VS Code, Kiro, or any IDE with notebook support
-code deploy_agentcore.ipynb
+NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your-password
+NEO4J_DATABASE=neo4j
 ```
 
-The notebook walks through every step in order:
-
-| Step | What it does |
-|------|-------------|
-| 0 | Configure AWS clients and detect Neo4j (workshop) or set manually (self-paced) |
-| 1 | Create DynamoDB tables (Hotels, Bookings, SteeringRules) |
-| 2 | Seed 18 hotels across 18 cities worldwide |
-| 3 | Seed 6 steering rules with STEER self-correction messages |
-| 4 | Create IAM roles (Lambda execution + AgentCore execution) |
-| 5 | Deploy 7 Lambda booking tools |
-| 6 | Deploy Neo4j query Lambda with VPC config (if Neo4j detected) |
-| 7 | Create AgentCore Gateway with MCP semantic routing |
-| 8 | Register Lambda tools as Gateway targets |
-| 9 | Deploy Strands agent to AgentCore Runtime via `bedrock-agentcore-starter-toolkit` |
-| 10 | Run 7 test scenarios against the live agent |
-
-Every cell is **idempotent** — if a resource already exists, the cell finds it and continues. You can re-run any cell or restart from any point.
-
-### Step 3: Test the deployed agent
-
-After Step 9 completes, test via AWS CLI:
+### Step 3: Run Notebook 1
 
 ```bash
-aws bedrock-agentcore invoke-agent-runtime \
-    --agent-runtime-arn <RUNTIME_ARN from notebook output> \
-    --payload '{"prompt": "Find hotels in Paris under $120"}' \
-    --region us-east-1 /tmp/response.json && cat /tmp/response.json
+code 01_hybrid_retrieval.ipynb
 ```
 
-Or continue running the test cells directly in the notebook (Step 10).
+The notebook confirms your Aura connection and prepared indexes, runs the hero question through hybrid retrieval, shows the structured evidence, and demonstrates abstention on a question the graph cannot answer. If Neo4j or Bedrock is not configured, the live cells self-skip and the notebook still runs top to bottom.
+
+The repository acceptance path runs the same notebook:
+
+```bash
+python setup/run_notebooks.py --labs 6
+```
+
+This executes Notebook 1 and parses Notebook 2 without creating AWS resources.
 
 ---
 
-## Neo4j Setup (Self-Paced)
+## Facilitator Path (Notebook 2)
 
-### What is Neo4j AuraDB?
+`02_agentcore_walkthrough.ipynb` drives an existing deployment. Set `AGENT_RUNTIME_ARN` for the pre-deployed AgentCore Runtime, then walk through:
 
-[Neo4j](https://neo4j.com/) is a graph database that stores data as nodes and relationships instead of rows and columns. This lets the agent answer questions like "What amenities does the Grand Hotel have?" by traversing graph connections directly, instead of guessing from text chunks. See [demo 01](../01-graphrag-demo/) for a full explanation.
+1. One caller-created request ID, reused on retries.
+2. A 15-guest request rejected with no write.
+3. A corrected request within the limit, recorded with a Neo4j `created_at`.
+4. Graph inspection of the resulting `ReservationRequest` and its `FOR_HOTEL` relationship.
+5. Correlation of AgentCore and CloudWatch by the same request ID.
+
+Every live cell self-skips when the Runtime or Neo4j is not configured. The notebook creates no AWS resources; deploying the boundary is a separate facilitator step described in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+---
+
+## Neo4j Setup
 
 ### Create a free Neo4j AuraDB instance
 
-1. Go to [console.neo4j.io](https://console.neo4j.io) and create a free account
-2. Click **New Instance** → **AuraDB Free**
-3. Choose a name (e.g., `hotel-graphrag`) and region
-4. **Download the credentials file** when prompted — it contains your URI, username, and password
+1. Go to [console.neo4j.io](https://console.neo4j.io) and create a free account.
+2. Click **New Instance**, then **AuraDB Free**.
+3. Download the credentials file when prompted. It contains your URI, username, and password.
 
-### Configure in the notebook
+### Prepare the Demo 06 graph
 
-In Step 0 of `deploy_agentcore.ipynb`, uncomment and set these values:
+The retrieval and command paths expect the prepared graph: hotel documents and chunks, the `hotel_chunk_embeddings` and `hotel_chunk_fulltext` indexes, the maximum-guests rule, and the fixture hotel identities in `fixtures/hotel_ids.json`. `graph_setup.py` applies this preparation, and Notebook 1 reports any missing pieces before it runs.
 
-```python
-NEO4J_HOST = "your-instance.databases.neo4j.io"   # From AuraDB console
-NEO4J_SECRET_ARN = ""       # Create a Secrets Manager secret with your password
-SECURITY_GROUP_ID = "sg-xxxxx"   # Your VPC security group
-SUBNET_IDS = ["subnet-xxxxx"]    # Your VPC subnets (for Lambda VPC config)
-```
-
-> If no Neo4j is configured, the notebook skips the graph Lambda and deploys without it — the booking agent still works fully for hotel search, booking, payment, and cancellation.
-
----
-
-## Steering Rules
-
-Rules live in [Amazon DynamoDB](https://aws.amazon.com/dynamodb/), not in code. Change agent behavior without redeploying:
-
-```json
-{
-    "rule_id": "max-guests",
-    "action": "book",
-    "condition_field": "guests",
-    "operator": "gt",
-    "threshold": 10,
-    "fail_message": "Guest count exceeds maximum of 10",
-    "steer_message": "Booking for {guests} guests is not available, but you CAN book for up to 10 guests. Adjust to 10 guests, proceed with the booking, and tell the user.",
-    "enabled": true
-}
-```
-
-The agent calls `validate_booking_rules` before every booking action. When a rule is violated, it receives the `steer_message` — an instruction on how to self-correct — instead of a hard failure.
-
-**To change a rule** (takes effect immediately, no redeploy):
+Run the one-time readiness check before an event to confirm every dependency is in place:
 
 ```bash
-aws dynamodb update-item \
-    --table-name workshop-SteeringRules \
-    --key '{"rule_id": {"S": "max-guests"}}' \
-    --update-expression "SET threshold = :t" \
-    --expression-attribute-values '{":t": {"N": "8"}}'
+python graph_setup.py --check-only
 ```
 
----
+It reads your `NEO4J_*` environment values and reports one corrective action per missing dependency (absent env vars, missing or offline indexes, missing constraints, unresolved fixtures, or the missing rule), exiting non-zero until the graph is ready. Drop `--check-only` to apply the idempotent Demo 06 graph preparation.
 
-## Test Scenarios
+### Two credentials, two secrets (deployed boundary)
 
-| # | Scenario | Expected behavior |
-|---|----------|-------------------|
-| 1 | Search hotels in Lisbon | Semantic routing → `search_available_hotels` → DynamoDB scan |
-| 2 | Book for 15 guests (max 10) | `validate_booking_rules` → STEER: "adjusted to 10 guests" |
-| 3 | Full flow: search → book → pay → confirm (same session) | CONFIRMED — multi-turn memory within session |
-| 4 | AnyCompany Rome Centro (0 rooms) | `book_hotel` → "no available rooms" — no hallucination |
-| 5 | Budget search under $100 | Cross-country search → finds cheapest hotels |
-| 6 | Confirm without payment | Hard hook `BookingGuardrailsHook` BLOCKS → agent asks to pay first |
-| 7 | Same-day booking | `validate_booking_rules` → STEER: "adjusted to tomorrow" |
+The deployed Runtime and command use separate identities and never share a credential:
+
+- **Runtime-read**: reads chunk search indexes and traverses to hotel and amenity data. No write privileges.
+- **Lambda-command**: reads the maximum-guests rule and fixture hotel identity, and creates workshop-owned `ReservationRequest` nodes and `FOR_HOTEL` relationships. Cannot update or delete canonical hotel, chunk, document, amenity, or rule data.
+
+Deployed code reads `NEO4J_READ_SECRET_ID` and `NEO4J_COMMAND_SECRET_ID` from Secrets Manager. Each secret contains `uri`, `username`, `password`, and `database`. Local notebooks read `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`. Passwords, secret values, and full connection strings must never appear in a deployment package, a prompt, or a log.
 
 ---
 
@@ -188,148 +183,47 @@ aws dynamodb update-item \
 
 ```
 06-agentcore-boto3-demo/
-├── deploy_agentcore.ipynb      # Step-by-step deployment + testing notebook
-├── booking_agent.py            # AgentCore Runtime entry point (Strands + BookingGuardrailsHook)
-├── cleanup.py                  # Delete all workshop resources
-├── agent_requirements.txt      # Runtime dependencies (deployed to AgentCore)
-├── requirements.txt            # Local dependencies (notebook)
+├── 01_hybrid_retrieval.ipynb        # Participant: hybrid retrieval, offline of AWS
+├── 02_agentcore_walkthrough.ipynb   # Facilitator: pre-deployed Runtime + command
+├── CONTRACTS.md                     # Frozen retrieval and command contracts
+├── DEPLOYMENT.md                    # The deployable boundary (Runtime, Gateway, Lambda)
+├── contracts.py                     # Shared schema and contract helpers
+├── graph_setup.py                   # Prepare and verify the Demo 06 graph
+├── hybrid_retrieval.py              # HybridCypherRetriever configuration and tool
+├── reservation_command.py           # Reservation command logic
+├── booking_agent.py                 # AgentCore Runtime entry point (Strands)
+├── agent_requirements.txt           # Runtime dependencies (deployed to AgentCore)
+├── requirements.txt                 # Local dependencies (notebooks)
+├── fixtures/
+│   └── hotel_ids.json               # Committed fixture hotel identities
+├── deployment/
+│   └── gateway_target.json          # The single Gateway target manifest
 ├── lambda_tools/
-│   ├── search_available_hotels/    # DynamoDB scan with city, country, price, stars filters
-│   ├── book_hotel/                 # Create PENDING reservation + decrement room count
-│   ├── get_booking/                # Read booking status
-│   ├── process_payment/            # PENDING → PAID
-│   ├── confirm_booking/            # PAID → CONFIRMED
-│   ├── cancel_booking/             # Cancel + return room to inventory
-│   ├── validate_booking_rules/     # Evaluate steering rules from DynamoDB
-│   └── query_knowledge_graph/      # Cypher queries to Neo4j (optional, VPC)
+│   └── create_reservation_request/  # The one reservation Lambda
 └── tool_schemas/
-    └── tools.json              # Tool definitions registered with AgentCore Gateway
+    └── tools.json                   # Tool definitions
 ```
-
----
-
-## Technologies
-
-| Technology | Purpose |
-|------------|---------|
-| [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) | Runtime (agent hosting), Gateway (MCP semantic tool routing) |
-| [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) | Hotels catalog, bookings, and steering rules |
-| [AWS Lambda](https://aws.amazon.com/lambda/) | Serverless tool functions (search, book, validate, query graph) |
-| [Amazon Bedrock](https://aws.amazon.com/bedrock/) | LLM provider (Claude Sonnet 5 via Strands BedrockModel) |
-| [bedrock-agentcore-starter-toolkit](https://pypi.org/project/bedrock-agentcore-starter-toolkit/) | Packages and deploys the agent container to AgentCore Runtime |
-| [Strands Agents](https://github.com/strands-agents/sdk-python) | Open-source agent framework (tool calling, lifecycle hooks) |
-| [Neo4j AuraDB Free](https://neo4j.com/cloud/aura-free/) | Managed graph database for knowledge graph (optional) |
-| [Cypher](https://neo4j.com/docs/cypher-manual/current/) | Neo4j query language for graph traversal |
-
----
-
-## Observability
-
-Amazon Bedrock AgentCore provides built-in observability when OpenTelemetry (OTel) dependencies are included in the agent package. The `agent_requirements.txt` includes:
-
-```
-strands-agents[otel]>=1.27.0
-aws-opentelemetry-distro>=0.7.0
-```
-
-With these dependencies, Amazon Bedrock AgentCore automatically instruments Strands Agents — capturing:
-- **Invocation logs** — every `invoke_agent_runtime` call
-- **Tool call traces** — which Lambda was invoked, input/output, latency
-- **Error tracking** — failed tool calls, guardrail blocks
-
-Logs appear in [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/) under `/aws/bedrock-agentcore/runtimes/`. See the [observability getting started guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-get-started.html) for details.
-
----
-
-## Latency Benchmarks
-
-Tool latency matters in production agents — every tool call adds to end-to-end response time. These benchmarks measure real [AWS Lambda](https://aws.amazon.com/lambda/) execution duration from [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/) REPORT lines, not CLI round-trip time.
-
-### DynamoDB-backed tools
-
-| Function | Cold start | Warm p50 | Warm p90 | Memory used |
-|----------|:----------:|:--------:|:--------:|:-----------:|
-| `validate_booking_rules` | ~550-620 ms | ~25 ms | ~105 ms | 88 MB / 256 MB |
-| `search_available_hotels` | ~540-660 ms | ~16 ms | ~43 ms | 88 MB / 256 MB |
-
-**Key takeaways:**
-- **Warm invocations are fast:** DynamoDB single-digit-ms reads translate to 10-30 ms Lambda execution for steering rule validation
-- **Cold starts are predictable:** ~450-540 ms Init + ~110 ms execution = ~600 ms total, only on first invocation after idle period
-- **Why this matters for steering:** `validate_booking_rules` runs before every booking action. At ~25 ms warm, it adds negligible latency while preventing hallucinated bookings that violate business rules
-
-### Neo4j AuraDB (optional Graph-RAG tool)
-
-| Function | Cold start | Warm p50 | Warm p90 | Memory used |
-|----------|:----------:|:--------:|:--------:|:-----------:|
-| `query_knowledge_graph` | ~1.9-2.0 s | ~13 ms | ~75 ms | 122 MB / 256 MB |
-
-[Neo4j AuraDB Free](https://neo4j.com/cloud/aura-free/) runs outside your VPC, but the [neo4j Python driver](https://neo4j.com/docs/python-manual/current/) reuses TCP connections across warm invocations. After the first call, subsequent [Cypher](https://neo4j.com/docs/cypher-manual/current/) queries execute in 11-30 ms — comparable to DynamoDB. Cold starts are higher (~2s) due to driver initialization + TLS handshake + Secrets Manager lookup.
-
-> **Benchmark methodology:** 10 consecutive invocations per function in `us-east-1`. Duration extracted from CloudWatch Lambda REPORT lines. Cold start = Init Duration + Duration. Warm = Duration only.
 
 ---
 
 ## Cleanup
 
-Run `cleanup.py` to delete all resources created by the notebook:
+Notebooks 1 and 2 create no AWS resources, so there is nothing to clean up from running them. If a facilitator deployed the AgentCore boundary, tear it down with the workshop cleanup in [Demo 10](../10-cleanup/).
 
-```bash
-uv run python cleanup.py
-```
-
-This removes: DynamoDB tables, Lambda functions, AgentCore Gateway + targets, AgentCore Runtime, IAM roles, and the S3 bucket used for agent deployment.
-
-> **Skip this if you are using an AWS-provided workshop account** — it will be cleaned up automatically.
-
----
-
-## Troubleshooting
-
-| Symptom | Resolution |
-|---------|------------|
-| `NoRegionError` | Set `AWS_DEFAULT_REGION=us-east-1` before running the notebook |
-| Agent returns 500 error | Check [CloudWatch Logs](https://aws.amazon.com/cloudwatch/) under `/aws/bedrock-agentcore/runtimes/` |
-| `ResourceNotFoundException` on Lambda | Re-run Step 5 in the notebook — Lambda deploy may have timed out |
-| Neo4j Lambda fails to connect | Verify `NEO4J_HOST` and `SECURITY_GROUP_ID` allow inbound on port 7687 |
-| `AccessDeniedException` on Bedrock | Enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) |
-| IAM propagation errors | The notebook waits 10s after IAM creation — retry the failing step after 30s |
-
----
-
-## Frequently Asked Questions
-
-### What is Amazon Bedrock AgentCore and how does it work?
-
-[Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) is an AWS managed service for hosting AI agents in production. It provides a **Runtime** (agent container hosting with auto-scaling) and a **Gateway** (MCP-based semantic routing to tools). The agent connects to the Gateway via MCP (Model Context Protocol), which discovers and routes tool calls to Lambda functions — no custom routing code needed.
-
-### Do I need AWS CDK to run this demo?
-
-No. This demo uses `boto3` and the `bedrock-agentcore-starter-toolkit` to create all AWS resources directly from the Jupyter notebook (`deploy_agentcore.ipynb`). No CDK installation or bootstrap is required.
-
-### How much does this deployment cost?
-
-All services are pay-per-use. At workshop scale (a few dozen test invocations): DynamoDB on-demand (~$0), Lambda (~$0 for <1M requests/month free tier), AgentCore Runtime (see [pricing](https://aws.amazon.com/bedrock/agentcore/)). Neo4j AuraDB Free is $0/month. Run `cleanup.py` after the workshop to avoid ongoing charges.
-
-### Can I change the LLM from Bedrock to another provider?
-
-Yes. Change the `BedrockModel` in `booking_agent.py` to any provider supported by Strands Agents: Anthropic API, Ollama (local models), or any OpenAI-compatible endpoint. The tools, Lambda functions, and AgentCore Gateway remain unchanged — only the LLM call changes. See [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/) for configuration.
-
-### How are the steering rules different from the hard guardrails?
-
-There are two distinct mechanisms: **Hard guardrails** (`BookingGuardrailsHook` in `booking_agent.py`) enforce payment-before-confirm and 48h cancellation window at the framework level — the LLM cannot bypass them. **Steering rules** (stored in DynamoDB, evaluated by `validate_booking_rules`) are softer: they return a STEER message guiding the agent to self-correct (e.g., "adjust guests to 10"). Steering rules can be changed in DynamoDB at any time without redeployment.
+> Skip cleanup if you are using an AWS-provided workshop account. It is cleaned up automatically.
 
 ---
 
 ## Navigation
 
-- **Previous:** [Demo 05 — Agent Control Steering](../05-steering-demo/)
-- **Start from the beginning:** [Demo 01 — Graph-RAG vs RAG](../01-graphrag-demo/)
+- **Previous:** [Demo 05: Agent Control Steering](../05-steering-demo/)
+- **Start from the beginning:** [Demo 01: Graph-RAG vs RAG](../01-graphrag-demo/)
 
 ---
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
+Contributions are welcome. See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
 
 ---
 
@@ -343,4 +237,4 @@ If you discover a potential security issue in this project, notify AWS/Amazon Se
 
 This library is licensed under the MIT-0 License. See the [LICENSE](../LICENSE) file for details.
 
-> Last updated: April 2026 | Strands Agents 1.27+ | Python 3.11+ | Amazon Bedrock AgentCore
+> Last updated: July 2026 | Strands Agents 1.27+ | Python 3.11+ | Amazon Bedrock AgentCore

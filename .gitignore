@@ -71,8 +71,6 @@ deployment_package.zip
 
 # AgentCore CLI config and generated files (contain AWS account IDs, ARNs, local paths)
 .bedrock_agentcore.yaml
-06-agentcore-boto3-demo/Dockerfile
-06-agentcore-boto3-demo/.dockerignore
 07-agentcore-memory-demo/Dockerfile
 07-agentcore-memory-demo/.dockerignore
 

@@ -1,0 +1,56 @@
+{
+  "name": "demo06-reservation-request",
+  "description": "The only Demo 06 Gateway target. Validates policy and records one Neo4j ReservationRequest.",
+  "credentialProviderConfigurations": [
+    {
+      "credentialProviderType": "GATEWAY_IAM_ROLE"
+    }
+  ],
+  "targetConfiguration": {
+    "mcp": {
+      "lambda": {
+        "lambdaArn": "${RESERVATION_LAMBDA_ARN}",
+        "toolSchema": {
+          "inlinePayload": [
+            {
+              "name": "create_reservation_request",
+              "description": "Validate and create one reservation request for a stable hotel ID returned by grounded retrieval. This does not confirm a booking or room availability.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "request_id": {
+                    "type": "string",
+                    "description": "Caller-created UUID. Reuse it if this command is retried."
+                  },
+                  "hotel_id": {
+                    "type": "string",
+                    "description": "Opaque stable hotel ID returned by grounded retrieval."
+                  },
+                  "check_in": {
+                    "type": "string",
+                    "description": "Check-in date in YYYY-MM-DD format."
+                  },
+                  "check_out": {
+                    "type": "string",
+                    "description": "Check-out date in YYYY-MM-DD format."
+                  },
+                  "guests": {
+                    "type": "integer",
+                    "description": "Requested number of guests."
+                  }
+                },
+                "required": [
+                  "request_id",
+                  "hotel_id",
+                  "check_in",
+                  "check_out",
+                  "guests"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -10,7 +10,7 @@ shape and asserts none of those roles is selected.
 
 Run with::
 
-    python -m unittest discover -s 08-cleanup -v
+    python -m unittest discover -s 10-cleanup -v
 """
 
 from __future__ import annotations

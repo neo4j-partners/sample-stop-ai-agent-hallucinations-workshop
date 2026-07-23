@@ -1,4 +1,4 @@
-# Module 8: Cleanup
+# Module 10: Cleanup
 
 Delete the resources created in Modules 6 and 7.
 
@@ -147,6 +147,18 @@ bug B6 damaged and asserts none of those roles is selected.
   created by the toolkit, shared across projects, and costs nothing. Deleting it is what caused the
   original incident. If you want it gone, remove it by hand.
 - **Anything untagged.**
+
+## Neo4j Teardown Is Separate
+
+The workshop Neo4j database is terminated through its own environment lifecycle, not by this script.
+The executable cleanup path here is AWS-only, deliberately: it contains no Neo4j record or index
+cleanup, because deleting graph data from a database that is about to be terminated wholesale adds
+failure modes without reclaiming anything. Workshop ownership markers on graph records are left in
+place for provenance.
+
+AgentCore Memory teardown, by contrast, stays part of this cleanup: environments that ran Module 7
+created `workshop_HotelBookingMemory`, and it is deleted through the same tag-gated path listed in
+the table above.
 
 ## Reclaiming Resources From a Run Before Tagging Existed
 

@@ -126,7 +126,12 @@ async def ingest(pipeline: SimpleKGPipeline, paths: list[Path]) -> int:
         print(f"  [{i}/{total}] {path.name}...", end=" ", flush=True)
         try:
             await asyncio.wait_for(
-                pipeline.run_async(text=text), timeout=DOC_TIMEOUT_SECONDS
+                pipeline.run_async(
+                    file_path=path.name,
+                    text=text,
+                    document_metadata={"source_filename": path.name},
+                ),
+                timeout=DOC_TIMEOUT_SECONDS,
             )
             print("✅")
         except asyncio.TimeoutError:
