@@ -4,6 +4,12 @@ This optional module shows one bounded memory story: persist a hotel
 preference, recall it for the same actor in a fresh session, prove a different
 actor sees nothing, and inspect its source and domain link in Neo4j.
 
+**At a Glance**
+- **What it covers:** explicit memory you can inspect, with provenance and per-actor isolation.
+- **Neo4j:** stores each memory, its source, and its link to the hotel domain.
+- **AWS:** Amazon Bedrock provides the embeddings.
+- **You'll build:** a memory that persists a preference, recalls it for the same user, and hides it from others.
+
 ## What the notebook does
 
 1. Creates run-specific actor and session IDs under the `demo08-` namespace.

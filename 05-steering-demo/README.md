@@ -8,6 +8,12 @@
 
 > Hooks are functions that run at specific points in an agent's lifecycle. In this demo, hooks intercept tool calls and block them using `cancel_tool` when a business rule is violated. The agent reports failure and the user must retry. Agent Control goes further: it **steers** the agent to fix the problem and complete the task, instead of failing.
 
+**At a Glance**
+- **Failure it stops:** a hard block that ends the task instead of guiding the agent to a safe result.
+- **Neo4j:** holds the same maximum-guests rule used across Demos 04 and 05.
+- **AWS:** Amazon Bedrock runs the agent; Agent Control steers it.
+- **You'll build:** a comparison of a blocking hook against a steering guardrail that self-corrects.
+
 ![Hooks (Block) vs Agent Control (Self-Correct) comparison](./images/hooks-vs-agent-control.jpg)
 
 Based on: [Strands Agents with Agent Control](https://strandsagents.com/blog/strands-agents-with-agent-control/)

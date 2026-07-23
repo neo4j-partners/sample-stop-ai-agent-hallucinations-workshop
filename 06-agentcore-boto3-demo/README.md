@@ -11,6 +11,12 @@ Take the anti-hallucination techniques from the earlier demos (01-05) into a pro
 
 This demo uses [Strands Agents](https://github.com/strands-agents/sdk-python) with [Amazon Bedrock](https://aws.amazon.com/bedrock/). The same boundary applies with other agent frameworks that support AgentCore Runtime.
 
+**At a Glance**
+- **Failure it stops:** carrying the grounded techniques into production without losing them.
+- **Neo4j:** Aura holds the hotel graph, the retrieval indexes, and the reservation rule.
+- **AWS:** AgentCore hosts the agent, Lambda performs the one safe action, Bedrock reasons.
+- **You'll build:** a grounded retrieval path plus one protected reservation-request action.
+
 ---
 
 ## What This Demo Shows

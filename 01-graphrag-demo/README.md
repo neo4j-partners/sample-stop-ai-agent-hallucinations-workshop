@@ -9,6 +9,12 @@
 
 > Traditional RAG makes AI agents hallucinate statistics and aggregations. This demo compares RAG ([FAISS](https://github.com/facebookresearch/faiss), a vector similarity search library) vs Graph-RAG ([Neo4j](https://neo4j.com), a graph database) on 300 hotel FAQ documents to measure which approach reduces hallucinations.
 
+**At a Glance**
+- **Failure it stops:** fabricated statistics and out-of-domain answers from vector-only RAG.
+- **Neo4j:** hotel knowledge graph with vector, full-text, and graph indexes.
+- **AWS:** Amazon Bedrock for reasoning and embeddings.
+- **You'll build:** a side-by-side RAG vs. Graph-RAG comparison over 300 hotel documents.
+
 ![Agentic RAG vs Agentic Graph-RAG comparison](images/rag-hallucination-problem.png)
 
 ## Research Background

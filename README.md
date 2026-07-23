@@ -7,7 +7,11 @@
 [![License: MIT-0](https://img.shields.io/badge/License-MIT--0-green.svg)](LICENSE)
 [![Last Updated](https://img.shields.io/badge/Updated-July_2026-brightgreen.svg?style=flat)]()
 
+When a booking agent invents a cancellation policy, confirms a room it never checked, or books past the maximum-guest limit, the cost lands on a real guest and a real reservation. An answer a business cannot trace is an answer it cannot act on. This workshop makes every agent answer traceable to connected data.
+
 This is a joint Neo4j and AWS workshop. It shows how a grounded agent moves from retrieval and deterministic controls into a production-shaped deployment, using connected data to stop the failures that make agents hallucinate: fabricated statistics, wrong tool picks, ignored business rules, and false claims of success.
+
+**Why Neo4j and AWS?** Two platforms solve different problems well. AWS supplies the reasoning and generation layer; Neo4j makes relationships traversable so retrieval returns connected, verifiable facts. Together they form one grounded agent stack.
 
 The central story is a division of responsibility:
 
@@ -32,6 +36,13 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 | Graph-RAG (Neo4j) | 73% lower per RAG-KG-IL, arXiv 2503.13514; grounded in entity relationships | Graph traversal plus Cypher | Structured domains such as hotels, products, and finance |
 
 > **Key insight:** Vector search always returns *something similar*, even when the answer does not exist in the database, which causes fabrication. Graph-RAG returns only what is explicitly connected in the knowledge graph.
+
+**What comes back for "amenities at AnyCompany Cairo Nile View?"**
+
+| Approach | What the agent gets back |
+|---|---|
+| Vector search alone | "Here are text chunks mentioning pool, gym, and free breakfast." |
+| Graph-RAG (Neo4j) | "Here are amenity chunks for AnyCompany Cairo Nile View (with its stable hotel_id), guest rating 4.4, connected to its 12 amenities and cancellation policy, or nothing if the graph has no such hotel." |
 
 ---
 
@@ -75,6 +86,8 @@ Neo4j and AWS each own a clear part of the grounded agent. One side holds the co
 
 ## Module List and Tracks
 
+![Why AI agents fail: the six-demo progressive flow](images/why-ai-agents-fail-six-demos-progressive-flow.png)
+
 Every module is marked as one of three tracks:
 
 - **Core:** the reliable end-to-end path an event should always run.
@@ -83,7 +96,7 @@ Every module is marked as one of three tracks:
 
 | # | Demo | Track | What It Solves | Stack |
 |:-:|------|-------|----------------|-------|
-| 00 | [Getting Started and Readiness](./00-getting-started/) | Core | Confirms AWS access, Aura connectivity, secrets, fixtures, and indexes before the session starts | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j) ![AWS](https://img.shields.io/badge/AWS-FF9900?style=flat&logo=amazon-aws) |
+| 00 | [Getting Started](./00-getting-started/) | Core | Strands Agents primer: agents, tools, lifecycle hooks, and multi-agent swarms | ![Strands](https://img.shields.io/badge/Strands_Agents-00B4D8?style=flat) ![AWS](https://img.shields.io/badge/AWS-FF9900?style=flat&logo=amazon-aws) |
 | 01 | [Graph-RAG vs RAG](./01-graphrag-demo/) | Core | Fabricated statistics, incomplete retrieval, out-of-domain hallucination | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j&logoColor=white) ![FAISS](https://img.shields.io/badge/FAISS-blue?style=flat) |
 | 01b | [Neo4j Retrieval Patterns](./01-graphrag-demo/) | Audience-dependent | Compares vector, hybrid, Vector-Cypher, and library Text2Cypher retrieval | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j) |
 | 02 | [Semantic Tool Selection](./02-semantic-tools-demo/) | Audience-dependent | Wrong tool picks and token waste at scale, using vector similarity plus workflow relationships | ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j) ![Embeddings](https://img.shields.io/badge/Embeddings-teal?style=flat) |
@@ -105,7 +118,7 @@ The facilitator may include optional modules, but Demo 06A remains a bounded 30 
 
 The learning path is progressive, and each demo can also run on its own.
 
-**Core track.** Demo 00 confirms readiness. Demo 01 shows why connected data reduces hallucination. Demos 04 and 05 show deterministic rule enforcement and Agent Control steering for the same maximum-guests policy. Demo 06A takes the grounded path to production on AgentCore. Demo 10 cleans up tagged AWS resources.
+**Core track.** Demo 00 is the Strands Agents primer covering the core concepts every later demo uses. Demo 01 shows why connected data reduces hallucination. Demos 04 and 05 show deterministic rule enforcement and Agent Control steering for the same maximum-guests policy. Demo 06A takes the grounded path to production on AgentCore. Demo 10 cleans up tagged AWS resources.
 
 **Audience-dependent additions.** Demo 01b compares Neo4j retrieval patterns. Demo 02 adds semantic tool selection backed by workflow relationships. Demo 03 adds graph-backed domain validation against the appropriate source of truth.
 
@@ -116,6 +129,11 @@ The learning path is progressive, and each demo can also run on its own.
 ## Demo 06A: The Production Core
 
 Demo 06A is the central production demonstration. In 30 to 45 minutes, learners run one predictable graph-enriched retrieval path against their own Aura instance, then observe the facilitator invoke and inspect the deployed production form with one protected reservation command.
+
+**The two hero questions.** The workshop is anchored by two questions asked against the same graph:
+
+- *"What amenities and guest rating does AnyCompany Cairo Nile View have?"* returns connected, grounded evidence.
+- *"Does AnyCompany Cairo Nile View guarantee room availability next weekend?"* makes the agent abstain, because the graph holds no live availability. The abstention is the point: the agent answers only from evidence.
 
 **Two notebooks:**
 
@@ -252,6 +270,19 @@ All demos default to Amazon Bedrock (Claude Sonnet 5) but work with any provider
 **Model alternatives:** Change the model in any demo by modifying the `BedrockModel(model_id=...)` call. See [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/) for all supported options.
 
 For demo-specific issues, check the troubleshooting section in each demo's README.
+
+---
+
+## From Workshop to Production
+
+Demo 06A is deliberately small. It runs on infrastructure that is set up for you in advance, so you can watch a grounded agent work without building everything from scratch. A real deployment grows from here in four ways:
+
+- **Add more data and rules to the graph.** The workshop uses a small set of hotels. Production adds more hotels, more relationships between them, and the business rules that keep answers correct.
+- **Keep returning the right evidence.** Tune how the agent searches the graph so it still finds the connected facts an answer needs as the amount of data grows.
+- **Run and watch the agent.** Host the agent on AWS AgentCore and follow each request from start to finish, so you can see exactly what the agent did and why.
+- **Keep the graph up to date.** Build the process that loads new documents and data into the graph over time.
+
+Neo4j Aura is Neo4j's fully managed cloud graph database service. Neo4j and AWS are collaborating to deepen the integration of Neo4j with Amazon Bedrock and AgentCore.
 
 ---
 

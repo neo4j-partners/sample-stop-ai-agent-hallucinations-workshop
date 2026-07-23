@@ -4,6 +4,12 @@
 read service. It shows one reviewed Cypher template and one optional
 Text2Cypher question, while making the trust boundary explicit.
 
+**At a Glance**
+- **What it covers:** governed graph access through a read-only trust boundary.
+- **Neo4j:** exposed through an MCP service with one reviewed Cypher template.
+- **AWS:** Amazon Bedrock runs the agent that calls the MCP tools.
+- **You'll build:** a read-only graph query path that fails closed unless the endpoint exposes exactly the expected tools.
+
 ## What this module teaches
 
 - Discover tools over streamable HTTP and fail closed unless the endpoint

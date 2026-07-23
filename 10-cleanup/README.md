@@ -2,6 +2,12 @@
 
 Delete the resources created in Modules 6 and 7.
 
+**At a Glance**
+- **What it covers:** safe teardown of the AWS resources the workshop created.
+- **Neo4j:** the Aura database is terminated separately, not by this module.
+- **AWS:** deletes the tagged resources from Demos 06 and 07.
+- **You'll build:** a dry-run-by-default cleanup that only deletes with an explicit flag.
+
 ## How to Run
 
 ```bash

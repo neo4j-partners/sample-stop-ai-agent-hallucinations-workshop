@@ -2,6 +2,12 @@
 
 Deploy AgentCore agent with long-term memory that recalls user preferences across sessions.
 
+**At a Glance**
+- **What it covers:** cross-session recall using a managed AWS memory service.
+- **Neo4j:** not required for this optional reference module.
+- **AWS:** AgentCore Memory stores and recalls user preferences across sessions.
+- **You'll build:** an agent that remembers a user preference between sessions, with no memory infrastructure to run.
+
 > **Optional managed-memory reference.** This module is not part of the core
 > workshop path. It layers AgentCore Memory onto a pre-provisioned booking
 > agent deployment and teaches one lesson: cross-session recall with a managed

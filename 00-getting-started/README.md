@@ -10,6 +10,12 @@ Get up and running with [Strands Agents](https://strandsagents.com) in under 30 
 
 > **Already familiar with Strands Agents?** Skip to [`01-graphrag-demo/`](../01-graphrag-demo/) and come back here if you need a refresher on hooks or swarms.
 
+**At a Glance**
+- **What it covers:** the Strands Agents concepts every later demo uses.
+- **Neo4j:** not used yet; this module is the framework primer.
+- **AWS:** Amazon Bedrock runs the agents and tools.
+- **You'll build:** small runnable agents, tools, lifecycle hooks, and a multi-agent swarm.
+
 ---
 
 ## What This Notebook Covers

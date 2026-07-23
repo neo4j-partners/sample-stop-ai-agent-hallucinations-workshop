@@ -7,6 +7,12 @@
 [![Hooks](https://img.shields.io/badge/Pattern-Neurosymbolic_Hooks-purple.svg?style=flat)](https://strandsagents.com/docs/user-guide/concepts/agents/hooks/)
 > Combines LLM flexibility with symbolic rules for verifiable, constrained decision-making in AI agents.
 
+**At a Glance**
+- **Failure it stops:** agents ignoring a business rule expressed only in the prompt.
+- **Neo4j:** holds the rule data the hook enforces.
+- **AWS:** Amazon Bedrock runs the agent the hook wraps.
+- **You'll build:** a Strands lifecycle hook that deterministically blocks an over-limit booking.
+
 
 ![Diagram showing LLM flexibility combined with symbolic rule enforcement](images/neurosymbolic.png)
 
