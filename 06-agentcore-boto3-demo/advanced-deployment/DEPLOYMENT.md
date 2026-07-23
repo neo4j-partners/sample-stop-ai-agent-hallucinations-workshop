@@ -11,7 +11,8 @@ tools:
 - `search_hotel_knowledge` runs in-process with the fixed Hybrid-Cypher
   retriever. It reads `NEO4J_READ_SECRET_ID` in the deployed environment.
 - `create_reservation_request` is discovered from AgentCore Gateway. The
-  Gateway must contain only the target in `deployment/gateway_target.json`.
+  Gateway must contain only the target in
+  `../deployment-tools/gateway_target.json`.
 
 The Runtime also requires `GATEWAY_URL`. `MODEL_ID`, `AWS_REGION`, and
 `AWS_DEFAULT_REGION` are optional configuration. The Runtime role should be

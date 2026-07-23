@@ -2,7 +2,7 @@
 
 # Demo 06: Grounded Hotel Retrieval and Safe Reservations
 
-Take the anti-hallucination techniques from the earlier demos (01-05) into a self-contained agent you run on your own laptop against [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) and [Amazon Bedrock](https://aws.amazon.com/bedrock/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request. The full Amazon Bedrock AgentCore deployment that hosts this same boundary as a managed service is staged in [`deployment-deferred/`](deployment-deferred/) for reference.
+Take the anti-hallucination techniques from the earlier demos (01-05) into a self-contained agent you run on your own laptop against [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) and [Amazon Bedrock](https://aws.amazon.com/bedrock/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request. The full Amazon Bedrock AgentCore deployment that hosts this same boundary as a managed service has its live source in [`deployment-tools/`](deployment-tools/) and its reference walkthrough in [`advanced-deployment/`](advanced-deployment/).
 
 [![Python](https://img.shields.io/badge/Python-3.11-green.svg?style=flat)](https://python.org)
 [![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-orange.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/agentcore/)
@@ -57,7 +57,7 @@ Local path (Notebook)
   reservation payload -> create_reservation_request -> Neo4j Aura (rule check + idempotent write)
 ```
 
-The same boundary, hosted as a managed AWS service, is staged in `deployment-deferred/`:
+The same boundary, hosted as a managed AWS service, has its live source in `deployment-tools/` and its reference walkthrough in `advanced-deployment/`:
 
 ```
 Deployment (deferred)
@@ -146,9 +146,9 @@ This executes the notebook without creating AWS resources.
 
 ---
 
-## Deployment (deferred, see `deployment-deferred/`)
+## Deployment (deferred, see `deployment-tools/` and `advanced-deployment/`)
 
-The full Amazon Bedrock AgentCore deployment is staged intact in [`deployment-deferred/`](deployment-deferred/) and is not run in this workshop pass. It holds the second facilitator notebook (`02_agentcore_walkthrough.ipynb`), the Runtime entry point (`booking_agent.py`), the Gateway target manifest, the reservation Lambda, the container `Dockerfile`, and the Secrets Manager and IAM boundary described in [`deployment-deferred/DEPLOYMENT.md`](deployment-deferred/DEPLOYMENT.md). See [`deployment-deferred/README.md`](deployment-deferred/README.md) for what is staged and why.
+The full Amazon Bedrock AgentCore deployment is staged intact and is not run in this workshop pass. Its live source lives in [`deployment-tools/`](deployment-tools/): the Runtime entry point (`booking_agent.py`), the Gateway target manifest (`gateway_target.json`), the reservation Lambda, and the container `Dockerfile`. Its reference material lives in [`advanced-deployment/`](advanced-deployment/): the second facilitator notebook (`02_agentcore_walkthrough.ipynb`) and the Secrets Manager and IAM boundary described in [`advanced-deployment/DEPLOYMENT.md`](advanced-deployment/DEPLOYMENT.md). See each folder's `README.md` for what is staged and why.
 
 ### Two credentials, two secrets (deferred boundary)
 
@@ -194,24 +194,25 @@ It reads your `NEO4J_*` environment values and reports one corrective action per
 ├── hybrid_retrieval.py              # HybridCypherRetriever configuration and tool
 ├── reservation_command.py           # Reservation command logic (called locally)
 ├── requirements.txt                 # Local dependencies (notebook)
-├── conftest.py                      # Keeps the local test run out of deployment-deferred/
+├── conftest.py                      # Keeps the local test run out of the deployment dirs
 ├── fixtures/
 │   └── hotel_ids.json               # Committed fixture hotel identities
 ├── tool_schemas/
 │   └── tools.json                   # Tool definitions
-└── deployment-deferred/             # Staged AWS deployment, not run in this pass
-    ├── README.md                    # What is staged here and why
+├── deployment-tools/                # Live deployment source, not run in this pass
+│   ├── README.md                    # What the live source is and how it is used
+│   ├── booking_agent.py             # AgentCore Runtime entry point (Strands)
+│   ├── Dockerfile                   # Runtime container image
+│   ├── .dockerignore
+│   ├── agent_requirements.txt       # Runtime dependencies (deployed to AgentCore)
+│   ├── gateway_target.json          # The single Gateway target manifest
+│   ├── lambda_tools/
+│   │   └── create_reservation_request/  # The one reservation Lambda
+│   └── test_runtime_integration.py  # Deployment tests (run in the deployment env)
+└── advanced-deployment/             # Reference only, nothing automated reads it
+    ├── README.md                    # What is kept here and why
     ├── 02_agentcore_walkthrough.ipynb  # Facilitator: pre-deployed Runtime + command
-    ├── DEPLOYMENT.md                # The deployable boundary (Runtime, Gateway, Lambda)
-    ├── booking_agent.py             # AgentCore Runtime entry point (Strands)
-    ├── Dockerfile                   # Runtime container image
-    ├── .dockerignore
-    ├── agent_requirements.txt       # Runtime dependencies (deployed to AgentCore)
-    ├── deployment/
-    │   └── gateway_target.json      # The single Gateway target manifest
-    ├── lambda_tools/
-    │   └── create_reservation_request/  # The one reservation Lambda
-    └── test_runtime_integration.py  # Deployment tests (run in the deployment env)
+    └── DEPLOYMENT.md                # The production-hardening boundary reference
 ```
 
 ---

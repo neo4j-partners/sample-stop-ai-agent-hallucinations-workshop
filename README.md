@@ -18,7 +18,7 @@ The central story is a division of responsibility:
 - **Neo4j** owns the connected hotel knowledge graph, the retrieval indexes, the tool metadata, the production rules, and the optional inspectable memory.
 - **AWS** supplies Bedrock models and embeddings, AgentCore hosting and tool exposure, Secrets Manager, IAM, Lambda integration where needed, and observability through CloudWatch and AgentCore.
 
-The main production demonstration, Demo 06, fits a rehearsed 30 to 45 minute session and runs entirely on a participant's own Aura and Amazon Bedrock. It is not a from-scratch AWS deployment lab and it does not implement a hotel reservation system. The AgentCore deployment that hosts the same boundary as a managed service is staged in [`06-agentcore-boto3-demo/deployment-deferred/`](06-agentcore-boto3-demo/deployment-deferred/).
+The main production demonstration, Demo 06, fits a rehearsed 30 to 45 minute session and runs entirely on a participant's own Aura and Amazon Bedrock. It is not a from-scratch AWS deployment lab and it does not implement a hotel reservation system. The AgentCore deployment that hosts the same boundary as a managed service is staged in [`06-agentcore-boto3-demo/advanced-deployment/`](06-agentcore-boto3-demo/advanced-deployment/).
 
 > Based on the Dev.to series [Stop AI Agent Hallucinations: 4 Essential Techniques](https://dev.to/aws/stop-ai-agent-hallucinations-4-essential-techniques-2i94) and [5 Techniques to Stop AI Agent Hallucinations in Production](https://dev.to/aws/5-techniques-to-stop-ai-agent-hallucinations-in-production-oik).
 
@@ -104,7 +104,7 @@ Every module is marked as one of three tracks:
 | 04 | [Deterministic Rule Enforcement](./04-neurosymbolic-demo/) | Core | Agents ignoring business rules in prompts, blocked by a Python lifecycle hook | ![Hooks](https://img.shields.io/badge/Hooks-purple?style=flat) |
 | 05 | [Agent Control Steering](./05-steering-demo/) | Core | Hard-blocking stops the task instead of steering the agent toward safe behavior | ![Agent Control](https://img.shields.io/badge/Agent_Control-orange?style=flat) |
 | 06 | [Grounded Hotel Retrieval and Safe Reservations](./06-agentcore-boto3-demo/) | Core | Taking the grounded path to a real action, run locally: one Hybrid-Cypher retrieval tool and one idempotent reservation-request write | ![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-FF9900?style=flat&logo=amazon-aws) ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j) ![Lambda](https://img.shields.io/badge/Lambda-FF9900?style=flat&logo=aws-lambda) |
-| 06 deploy | [AgentCore Deployment (deferred)](./06-agentcore-boto3-demo/deployment-deferred/) | Optional-advanced | Staged, not run in this pass: host the same boundary as a managed AWS service (Runtime, Gateway, Lambda) | ![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-FF9900?style=flat&logo=amazon-aws) |
+| 06 deploy | [AgentCore Deployment (deferred)](./06-agentcore-boto3-demo/advanced-deployment/) | Optional-advanced | Staged, not run in this pass: host the same boundary as a managed AWS service (Runtime, Gateway, Lambda) | ![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-FF9900?style=flat&logo=amazon-aws) |
 | 07 | [AgentCore Memory](./07-agentcore-memory-demo/) | Optional-advanced | Managed cross-session memory with no memory infrastructure to operate | ![Memory](https://img.shields.io/badge/AgentCore-Memory-FF9900?style=flat) |
 | 08 | [Inspectable Neo4j Memory](./08-neo4j-memory-demo/) | Optional-advanced | Explicit, inspectable memory with provenance and actor isolation | ![Neo4j](https://img.shields.io/badge/Neo4j-Memory-4581C3?style=flat&logo=neo4j) |
 | 09 | [Neo4j MCP and Controlled Text2Cypher](./09-neo4j-mcp-demo/) | Optional-advanced | Governed graph exploration through a read-only MCP trust boundary | ![MCP](https://img.shields.io/badge/Neo4j-MCP-4581C3?style=flat&logo=neo4j) |
@@ -122,7 +122,7 @@ The learning path is progressive, and each demo can also run on its own.
 
 **Audience-dependent additions.** Demo 01b compares Neo4j retrieval patterns. Demo 02 adds semantic tool selection backed by workflow relationships. Demo 03 adds graph-backed domain validation against the appropriate source of truth.
 
-**Optional-advanced tracks.** The Demo 06 AgentCore deployment is staged in `06-agentcore-boto3-demo/deployment-deferred/` as deferred future work. Demo 07 shows managed AgentCore Memory, and Demo 08 shows inspectable Neo4j graph memory with provenance; the two close with a shared decision guide. Demo 09 teaches MCP and controlled Text2Cypher as a trust-boundary alternative to Demo 06's fixed Hybrid-Cypher path.
+**Optional-advanced tracks.** The Demo 06 AgentCore deployment is staged in `06-agentcore-boto3-demo/advanced-deployment/` as deferred future work. Demo 07 shows managed AgentCore Memory, and Demo 08 shows inspectable Neo4j graph memory with provenance; the two close with a shared decision guide. Demo 09 teaches MCP and controlled Text2Cypher as a trust-boundary alternative to Demo 06's fixed Hybrid-Cypher path.
 
 ---
 
@@ -137,7 +137,7 @@ Demo 06 is the central production demonstration. In 30 to 45 minutes, learners r
 
 **One notebook:**
 
-`01_hybrid_retrieval.ipynb` is the participant hands-on path, run entirely against each participant's own Aura instance and Amazon Bedrock. It covers grounded retrieval, abstention, the maximum-guests rejection, the idempotent reservation write, and graph inspection. The facilitator notebook that invokes a pre-deployed AgentCore Runtime is staged in `06-agentcore-boto3-demo/deployment-deferred/` and is not run in this pass.
+`01_hybrid_retrieval.ipynb` is the participant hands-on path, run entirely against each participant's own Aura instance and Amazon Bedrock. It covers grounded retrieval, abstention, the maximum-guests rejection, the idempotent reservation write, and graph inspection. The facilitator notebook that invokes a pre-deployed AgentCore Runtime is staged in `06-agentcore-boto3-demo/advanced-deployment/` and is not run in this pass.
 
 **Two logical tools:**
 
@@ -148,9 +148,9 @@ Demo 06 is the central production demonstration. In 30 to 45 minutes, learners r
 
 In the deferred AWS deployment, the retrieval tool runs in the AgentCore Runtime and the reservation command runs as a Lambda behind the Gateway. There is exactly one write command in this design. The retriever uses one fixed pattern with explicit `NAIVE` fusion and `top_k=5`, accepts only `query`, and returns bounded chunk evidence, a combined score, exact matched terms, and the connected hotel with its stable `hotel_id`, name, address, guest rating, and up to 12 amenities.
 
-**What Demo 06 deliberately excludes from the core path:** no DynamoDB tables, no retriever-mode or ranker selector, no Neo4j MCP server or Text2Cypher, no model-generated or caller-supplied Cypher, no separate validation Lambda, and no payment, confirmation, or inventory simulation. The AWS deployment that hosts this boundary as a managed service is staged in `deployment-deferred/` and is not run in the core path.
+**What Demo 06 deliberately excludes from the core path:** no DynamoDB tables, no retriever-mode or ranker selector, no Neo4j MCP server or Text2Cypher, no model-generated or caller-supplied Cypher, no separate validation Lambda, and no payment, confirmation, or inventory simulation. The AWS deployment that hosts this boundary as a managed service is staged in `advanced-deployment/` and is not run in the core path.
 
-> **Offline status:** The self-contained notebook is built and registered on the `extend-neo4j` branch. The deterministic offline gates pass, with `uv run setup/run_notebooks.py --labs 6` reporting Passed 1 / Failed 0 while every live cell self-skips and no AWS resources are created. Live participant retrieval, the local reservation write, and event timing remain operator rehearsal tasks that need Neo4j and AWS credentials. The deferred deployment and its facilitator notebook are staged in `deployment-deferred/`.
+> **Offline status:** The self-contained notebook is built and registered on the `extend-neo4j` branch. The deterministic offline gates pass, with `uv run setup/run_notebooks.py --labs 6` reporting Passed 1 / Failed 0 while every live cell self-skips and no AWS resources are created. Live participant retrieval, the local reservation write, and event timing remain operator rehearsal tasks that need Neo4j and AWS credentials. The deferred deployment and its facilitator notebook are staged in `advanced-deployment/`.
 
 ---
 
@@ -235,7 +235,7 @@ The demos load the nearest `.env` first, so a `.env` inside a specific demo fold
 4. Enable the **APOC** plugin in your Aura instance settings
 5. For Demo 01, run `build_graph_lite.py` (30 docs, about 15 min) or `build_graph.py` (300 docs, about 2 hours) to populate the graph
 
-Participants use their own Aura instance for the hands-on retrieval and reservation path through Demo 06. The AgentCore deployment that would host this boundary on shared infrastructure is staged in `06-agentcore-boto3-demo/deployment-deferred/` and is not run in this pass.
+Participants use their own Aura instance for the hands-on retrieval and reservation path through Demo 06. The AgentCore deployment that would host this boundary on shared infrastructure is staged in `06-agentcore-boto3-demo/advanced-deployment/` and is not run in this pass.
 
 ---
 

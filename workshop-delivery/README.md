@@ -4,11 +4,11 @@ Joint Neo4j and AWS workshop: "How to Stop AI Agent Hallucinations, plus Product
 
 This guide lists the workshop modules, the prerequisites to confirm before an event, and suggested module selections by audience and time.
 
-The central story is one sentence: Neo4j holds connected hotel knowledge, retrieval indexes, tool metadata, production rules, and optional inspectable memory, while AWS supplies Bedrock models and embeddings, AgentCore hosting and tool exposure, Secrets Manager, IAM, Lambda integration, and observability. Demo 06 is the bounded 30 to 45 minute grounded-retrieval and safe-reservation demonstration that anchors the workshop, run locally on the participant's own Aura and Bedrock. The full AWS deployment of that same boundary is staged as the deferred deployment path in `06-agentcore-boto3-demo/deployment-deferred/`.
+The central story is one sentence: Neo4j holds connected hotel knowledge, retrieval indexes, tool metadata, production rules, and optional inspectable memory, while AWS supplies Bedrock models and embeddings, AgentCore hosting and tool exposure, Secrets Manager, IAM, Lambda integration, and observability. Demo 06 is the bounded 30 to 45 minute grounded-retrieval and safe-reservation demonstration that anchors the workshop, run locally on the participant's own Aura and Bedrock. The full AWS deployment of that same boundary is staged as the deferred deployment path in `06-agentcore-boto3-demo/advanced-deployment/`.
 
 Why this split matters: an agent that cannot trace its answer to connected data cannot be trusted in front of a guest. Neo4j makes the relationships traversable and AWS supplies the reasoning, so every answer is grounded in evidence the graph can defend.
 
-For the frozen retrieval and command contracts, see `06-agentcore-boto3-demo/CONTRACTS.md`. For the deferred deployment boundary, see `06-agentcore-boto3-demo/deployment-deferred/DEPLOYMENT.md`. For the architecture visual, see `workshop-delivery/architecture.md`.
+For the frozen retrieval and command contracts, see `06-agentcore-boto3-demo/CONTRACTS.md`. For the deferred deployment boundary, see `06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md`. For the architecture visual, see `workshop-delivery/architecture.md`.
 
 ---
 
@@ -36,7 +36,7 @@ Demo 06 stays a bounded 30 to 45 minute module regardless of which optional modu
 | Demo 01b | Optional | The audience wants retrieval-pattern depth: vector, hybrid, Vector-Cypher, and library Text2Cypher. Best for developers and data practitioners. | None beyond the prepared indexes |
 | Demo 02 | Audience-dependent | The audience runs agents with many similar tools and cares about token cost and tool-selection accuracy. | None beyond Aura and Bedrock |
 | Demo 03 | Audience-dependent | The audience worries about fabricated answers in generative output and wants multi-agent validation. | None beyond Aura and Bedrock |
-| Deferred deployment path | Deferred, optional advanced | Do not schedule as a live module in this pass. Use only as a going-further discussion of the deployment boundary staged in `06-agentcore-boto3-demo/deployment-deferred/`. | Not run in the current implementation pass |
+| Deferred deployment path | Deferred, optional advanced | Do not schedule as a live module in this pass. Use only as a going-further discussion of the deployment boundary staged in `06-agentcore-boto3-demo/advanced-deployment/`. | Not run in the current implementation pass |
 | Demo 07 | Optional managed-memory reference | The environment already has the pre-provisioned multi-table booking deployment this reference reuses. | A pre-provisioned booking agent deployment must already exist |
 | Demo 08 | Optional advanced | The audience leans toward Neo4j and wants inspectable memory with provenance and actor isolation. Runs independently of Demo 07. | Aura and Bedrock embeddings |
 | Demo 09 | Optional advanced | The audience wants the governed MCP and controlled Text2Cypher trust boundary. | A pre-deployed read-only Neo4j MCP endpoint |
@@ -60,7 +60,7 @@ Before the event, confirm:
 - Aura connectivity. Participants use their own Aura instance for the hands-on retrieval path through Demo 06.
 - Secrets, for the deferred deployment path only. That boundary uses separate Runtime-read and Lambda-command secrets in Secrets Manager, each holding URI, username, password, and database fields. A shared Runtime or Lambda never accepts participant database credentials as prompt or tool input. Demo 06 in this pass runs locally and reads standard `NEO4J_*` environment values.
 - Graph fixtures and indexes. Run `python graph_setup.py --check-only` in `06-agentcore-boto3-demo/` to confirm the `hotel_chunk_embeddings` and `hotel_chunk_fulltext` indexes, the uniqueness constraints, the fixture hotel identities, and the maximum-guests rule.
-- The pre-deployed AgentCore Runtime, reservation Gateway target, and reservation Lambda apply only to the deferred deployment path staged in `06-agentcore-boto3-demo/deployment-deferred/` and are not required in this pass. Demo 06 runs locally with no Runtime.
+- The pre-deployed AgentCore Runtime, reservation Gateway target, and reservation Lambda apply only to the deferred deployment path staged in `06-agentcore-boto3-demo/advanced-deployment/` and are not required in this pass. Demo 06 runs locally with no Runtime.
 - The Agent Control server for Demo 05, which is a separate product and is not bundled with the workshop.
 - The Neo4j MCP endpoint only when Demo 09 is selected.
 

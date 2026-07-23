@@ -27,7 +27,7 @@ class RuntimeIntegrationTests(unittest.TestCase):
         )
 
     def test_gateway_manifest_has_only_the_reservation_command(self) -> None:
-        path = DEMO_DIR / "deployment" / "gateway_target.json"
+        path = DEMO_DIR / "gateway_target.json"
         target = json.loads(path.read_text(encoding="utf-8"))
         tools = target["targetConfiguration"]["mcp"]["lambda"][
             "toolSchema"
@@ -162,9 +162,9 @@ class RuntimeIntegrationTests(unittest.TestCase):
             )
             self.assertNotIn(contracts.COMMAND_SECRET_ID_ENV, os.environ)
 
-        deployment = (DEMO_DIR / "DEPLOYMENT.md").read_text(
-            encoding="utf-8"
-        )
+        deployment = (
+            DEMO_DIR.parent / "advanced-deployment" / "DEPLOYMENT.md"
+        ).read_text(encoding="utf-8")
         self.assertIn(contracts.READ_SECRET_ID_ENV, deployment)
         self.assertIn(contracts.COMMAND_SECRET_ID_ENV, deployment)
         self.assertIn("separate Neo4j users", deployment)

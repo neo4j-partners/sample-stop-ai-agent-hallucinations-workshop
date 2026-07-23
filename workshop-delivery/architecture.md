@@ -6,7 +6,7 @@
 > adopted into the root README or facilitator guide. Nothing here deploys AWS
 > resources. Review the diagrams against the frozen contracts in
 > `06-agentcore-boto3-demo/CONTRACTS.md` and
-> `06-agentcore-boto3-demo/deployment-deferred/DEPLOYMENT.md`.
+> `06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md`.
 
 This file contains two views:
 
@@ -90,20 +90,20 @@ Key points to verify against the contracts:
 ### Deferred deployment path
 
 The same boundary, hosted as a managed AWS service, is staged in
-`06-agentcore-boto3-demo/deployment-deferred/` and is not run in this workshop
+`06-agentcore-boto3-demo/advanced-deployment/` and is not run in this workshop
 pass. It holds the facilitator notebook
-`06-agentcore-boto3-demo/deployment-deferred/02_agentcore_walkthrough.ipynb`, the
+`06-agentcore-boto3-demo/advanced-deployment/02_agentcore_walkthrough.ipynb`, the
 Runtime entry point
-`06-agentcore-boto3-demo/deployment-deferred/booking_agent.py`, the single
+`06-agentcore-boto3-demo/deployment-tools/booking_agent.py`, the single
 Gateway target, the one reservation Lambda, and the Secrets Manager and IAM
 boundary described in
-`06-agentcore-boto3-demo/deployment-deferred/DEPLOYMENT.md`. Deploying it would
+`06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md`. Deploying it would
 provision the architecture below. The facilitator, not the participant, would
 create one `request_id` UUID in the caller and reuse it on retry, so the same
 value correlates every downstream log entry.
 
 ```
-                            FACILITATOR CALLER  (deployment-deferred/02_agentcore_walkthrough.ipynb)
+                            FACILITATOR CALLER  (advanced-deployment/02_agentcore_walkthrough.ipynb)
                             creates request_id = uuid4(), reuses it on every retry
                                              |
                                              |  request_id
@@ -112,7 +112,7 @@ value correlates every downstream log entry.
  |                                                                                               |
  |  +-------------------------------------+           +--------------------------------------+   |
  |  |  Amazon Bedrock                     |<----------|  AgentCore Runtime                   |   |
- |  |  - reasoning model (MODEL_ID)       |  query    |  entry point in deployment-deferred/ |   |
+ |  |  - reasoning model (MODEL_ID)       |  query    |  entry point in deployment-tools/    |   |
  |  |  - Nova 2 query embeddings          |  text     |                                      |   |
  |  |    1024 dim, GENERIC_INDEX purpose  |---------->|  Tool 1 (in-process):                |   |
  |  |    (pinned Nova embedding contract) |  vectors  |    search_hotel_knowledge            |   |
