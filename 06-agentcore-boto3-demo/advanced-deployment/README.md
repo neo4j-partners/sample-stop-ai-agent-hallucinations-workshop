@@ -23,7 +23,7 @@ with no AWS deployment.
 The live, deployable source (the Runtime entry point, container, Gateway target
 manifest, and reservation Lambda) lives one level over in
 [`../deployment-tools/`](../deployment-tools/). That is the folder the stand-alone
-provisioning script and the notebook deploy sections consume.
+provisioning script consumes.
 
 ## Running the walkthrough
 

@@ -150,6 +150,27 @@ This executes the notebook without creating AWS resources.
 
 The full Amazon Bedrock AgentCore deployment is staged intact and is not run in this workshop pass. Its live source lives in [`deployment-tools/`](deployment-tools/): the Runtime entry point (`booking_agent.py`), the Gateway target manifest (`gateway_target.json`), the reservation Lambda, and the container `Dockerfile`. Its reference material lives in [`advanced-deployment/`](advanced-deployment/): the second facilitator notebook (`02_agentcore_walkthrough.ipynb`) and the Secrets Manager and IAM boundary described in [`advanced-deployment/DEPLOYMENT.md`](advanced-deployment/DEPLOYMENT.md). See each folder's `README.md` for what is staged and why.
 
+### Provisioning the infrastructure first
+
+Before any deploy step, the slow, privileged AWS infrastructure has to exist:
+the Neo4j command secret, the three least-privilege IAM roles (reservation
+Lambda, Gateway, Runtime), the reservation Lambda, and the AgentCore Gateway
+with its single target. The stand-alone [`../setup/provision_agentcore.py`](../setup/provision_agentcore.py)
+script creates all of it and writes `AGENTCORE_GATEWAY_URL`,
+`AGENTCORE_RUNTIME_ROLE_ARN`, and `NEO4J_COMMAND_SECRET_ID` into the repo-root
+`.env` for the deploy step to read.
+
+```bash
+uv run setup/provision_agentcore.py provision   # Create the AgentCore infrastructure
+uv run setup/provision_agentcore.py status       # Report what exists
+uv run setup/provision_agentcore.py teardown      # Delete it again
+```
+
+This packages and deploys the reservation Lambda from `deployment-tools/`, so it
+reads Demo 06 files but Demo 06 never reads anything under `setup/`. The full
+command reference, the resources it creates, the Lambda packaging details, and
+the `.env` keys it manages are documented in [`../setup/README.md`](../setup/README.md).
+
 ### Two credentials, two secrets (deferred boundary)
 
 When deployed, the Runtime and command use separate identities and never share a credential:

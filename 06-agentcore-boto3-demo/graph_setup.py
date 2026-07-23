@@ -138,10 +138,6 @@ RETURN size(rules) AS rule_count,
 """.strip()
 
 
-class ReadinessError(RuntimeError):
-    """Raised when a graph cannot satisfy the frozen Demo 06 contract."""
-
-
 @dataclass(frozen=True)
 class FixtureManifest:
     version: int
@@ -331,8 +327,13 @@ def apply_demo6_graph(
     driver: Driver,
     database: str,
     manifest: FixtureManifest,
-) -> None:
-    """Apply only the idempotent Demo 06 graph-owned data."""
+) -> list[str]:
+    """Apply the idempotent Demo 06 graph-owned data.
+
+    Return any blocking problems that prevent preparation, for example a
+    missing Demo 01 graph. When the returned list is empty, the fixture IDs,
+    constraints, and maximum-guests rule have been applied.
+    """
     with _session(driver, database) as session:
         session.run(HOTEL_ID_CONSTRAINT).consume()
         session.run(REQUEST_ID_CONSTRAINT).consume()
@@ -342,7 +343,7 @@ def apply_demo6_graph(
         )
         problems = _fixture_problems(resolution, manifest, require_ids=False)
         if problems:
-            raise ReadinessError("\n".join(problems))
+            return problems
         session.run(
             APPLY_FIXTURE_IDS_QUERY,
             fixtures=manifest.rows(),
@@ -355,6 +356,7 @@ def apply_demo6_graph(
             steering_message=RULE_STEERING_MESSAGE,
             workshop_owner=contracts.WORKSHOP_OWNER,
         ).consume()
+    return []
 
 
 def readiness_problems(
@@ -447,11 +449,13 @@ def main() -> int:
 
     uri, auth, database = _configuration()
     driver = GraphDatabase.driver(uri, auth=auth)
+    problems: list[str] = []
     try:
         driver.verify_connectivity()
         if not args.check_only:
-            apply_demo6_graph(driver, database, manifest)
-        problems = readiness_problems(driver, database, manifest)
+            problems = apply_demo6_graph(driver, database, manifest)
+        if not problems:
+            problems = readiness_problems(driver, database, manifest)
     finally:
         driver.close()
 

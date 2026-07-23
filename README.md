@@ -192,6 +192,27 @@ uv run setup/run_notebooks.py --labs 2-5   # A range
 `setup/run_notebooks.py --labs 6` is the repository acceptance path for Demo 06. It executes the self-contained participant notebook, whose live cells self-skip when Neo4j or Bedrock is absent, and it never creates or modifies AWS resources. Labs 08 and 09 are optional notebook-only modules. Lab 10 deletes tagged workshop resources and requires `--include-cleanup`. See
 [`setup/README.md`](setup/README.md) for the complete command reference.
 
+### Provision the deferred AgentCore deployment (optional)
+
+The core path never needs this. The self-contained Demo 06 notebook runs
+against your own Aura and Amazon Bedrock and creates no AWS resources. When a
+facilitator opts in to the managed AgentCore boundary, `setup/provision_agentcore.py`
+stands up the slow, privileged infrastructure first: the Neo4j command secret,
+the three least-privilege IAM roles, the reservation Lambda, and the AgentCore
+Gateway with its single target. It then writes a handful of identifiers into the
+repo-root `.env` for the deploy step to read.
+
+```bash
+uv run setup/provision_agentcore.py provision   # Create the AgentCore infrastructure
+uv run setup/provision_agentcore.py status       # Report what exists
+uv run setup/provision_agentcore.py teardown      # Delete it again
+```
+
+This requires AWS credentials that can create Secrets Manager, IAM, Lambda, and
+AgentCore resources, plus the `NEO4J_*` values already in `.env`. The complete
+command reference, the resources it creates, and the `.env` keys it manages are
+documented in [`setup/README.md`](setup/README.md).
+
 ### Notebook Setup (nbstripout)
 
 This repository strips notebook output on commit through a git filter declared in `.gitattributes` (`*.ipynb filter=nbstripout diff=ipynb`). Register the filter once after cloning, or every `.ipynb` checkout runs against an undefined filter:
