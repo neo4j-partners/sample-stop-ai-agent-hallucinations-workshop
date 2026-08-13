@@ -4,9 +4,12 @@
 
 This folder holds the deployable source for the Amazon Bedrock AgentCore deployment
 of Demo 06: the Runtime entry point, its container, the single Gateway target
-manifest, and the one reservation Lambda. The stand-alone provisioning script under
-[`../../setup/`](../../setup/) packages these, and the deploy sections of
-[`../01_hybrid_retrieval.ipynb`](../01_hybrid_retrieval.ipynb) build and launch them.
+manifest, and the one reservation Lambda. [`setup/provision_agentcore.py`](../../setup/provision_agentcore.py)
+creates the secret, the IAM roles, the Lambda, and the Gateway from this source.
+[`../deploy_agentcore.ipynb`](../deploy_agentcore.ipynb) then builds the Runtime
+container and launches it through the AgentCore starter toolkit.
+[`../01_hybrid_retrieval.ipynb`](../01_hybrid_retrieval.ipynb) is the local participant
+notebook and deploys nothing.
 **Nothing here runs unless a facilitator provisions the infrastructure and opts in.**
 
 ## What is here
