@@ -1,4 +1,2 @@
 # The shared package brings boto3, neo4j, neo4j-graphrag, and python-dotenv.
 -e ../workshop
-
-numpy>=1.24.0

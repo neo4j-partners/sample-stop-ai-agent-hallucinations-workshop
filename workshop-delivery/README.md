@@ -29,7 +29,7 @@ Reference documents:
 | 0 | [`00-setup/`](../00-setup/) | None. A credential checklist | Done before the room sits down. Ends in one verification command that proves Aura and Bedrock both work |
 | 1 | [`01-graph-build/`](../01-graph-build/) | `1.1_build_graph.ipynb` | The first partnership peak. Bedrock extracts entities and relationships against a pinned schema and Neo4j stores them with the vector and full-text indexes. Also the longest wall-clock lab |
 | 2 | [`02-retrieval/`](../02-retrieval/) | `2.1_vector_retrievers.ipynb`, `2.2_fulltext_retrievers.ipynb`, `2.3_text2cypher.ipynb` | The lesson the room remembers. Four retrievers on the same questions, closing on a question the graph cannot answer |
-| 3 | [`03-agents-and-tools/`](../03-agents-and-tools/) | `3.1_strands_primer.ipynb` | Strands Agents concepts with a retriever already in hand: agents, tools, lifecycle hooks, swarms. Section 6 assembles `hotel_agent` |
+| 3 | [`03-agents-and-tools/`](../03-agents-and-tools/) | `3.1_strands_primer.ipynb` | Strands Agents concepts with a retriever already in hand: agents, model providers, tools, lifecycle hooks. Section 5 assembles `hotel_agent` |
 | 4 | [`04-grounded-write/`](../04-grounded-write/) | `4.1_reservation_write.ipynb` | The safety beat. A rule read from the graph rejects a 15-guest request inside the write transaction, and a retry stays idempotent |
 | 5 | [`05-agentcore-deploy/`](../05-agentcore-deploy/) | `5.1_agentcore_deploy.ipynb`, `5.2_teardown.ipynb`, `5.3_agentcore_walkthrough.ipynb` | The second peak, and the only billable lab. The Lab 4 agent hosted on AgentCore Runtime with the retriever unchanged, then torn down by tag |
 | 6 | [`06-memory/`](../06-memory/) | `6.1_neo4j_agent_memory.ipynb` | Optional closing material. Graph-native memory with provenance and actor isolation |
@@ -54,7 +54,7 @@ Everything else is scaffolding around these.
 | Build Lab 1's lite 30-document corpus rather than the full 300 | Roughly 15 minutes instead of roughly 2 hours. `MODE` is already `"lite"` in step 1 of the notebook. Every later lab works against the lite graph |
 | Build the graph before the session | Nothing. `prepare_graph.py` is idempotent, so a graph that already reports ready is verified rather than rebuilt |
 | Skip `2.3_text2cypher.ipynb` | The one demonstration that Neo4j computes a count over the whole matching set, which top-k retrieval cannot do. Nothing later in the workshop depends on it |
-| Skim Lab 3 sections 1 through 5 for a Strands-fluent room | Little, if you still run section 6. That section assembles `hotel_agent`, which Labs 4 and 5 carry forward by name |
+| Skim Lab 3 sections 1 through 4 for a Strands-fluent room | Little, if you still run section 5. That section assembles `hotel_agent`, which Labs 4 and 5 carry forward by name |
 | Run Lab 5 as a facilitator demonstration rather than hands-on | Participant muscle memory, and it saves every participant's AWS spend and every participant's teardown |
 | Skip `5.3_agentcore_walkthrough.ipynb` | The `request_id` correlation across AgentCore and CloudWatch traces. It depends on `5.1` and reads `AGENT_RUNTIME_ARN`, which `5.1` produces at launch |
 | Drop Lab 6 | The graph-memory argument and the AgentCore Memory comparison. It is the only fully optional lab |
@@ -80,7 +80,8 @@ A rehearsed per-lab time budget is still outstanding. The two wall-clock numbers
 - **The Workshop Studio username variable.** The hosted CloudFormation environment writes `NEO4J_USER`, and every lab in this repository reads `NEO4J_USERNAME`. If authentication fails only inside the hosted workshop, this mismatch is the first thing to check.
 - **Python 3.12 or newer, and [uv](https://docs.astral.sh/uv/).** The shared `workshop` package declares `requires-python = ">=3.12"` in `workshop/pyproject.toml`, and every lab installs it in editable mode with `-e ../workshop` at the top of its `requirements.txt`.
 - **The AgentCore infrastructure, for Lab 5 only.** Labs 1 through 4 and Lab 6 create no AWS resources beyond Bedrock inference calls. Lab 5 needs `uv run setup/provision_agentcore.py provision` to have run first. It stands up the Neo4j command secret, three least-privilege IAM roles, the reservation Lambda, and the AgentCore Gateway with its single target, then writes the resulting identifiers into the repo-root `.env` for `5.1_agentcore_deploy.ipynb` to read. It is idempotent, and `status` reports what exists.
-- **Two Secrets Manager secrets for the deployed path,** one Runtime-read and one Lambda-command, each holding `uri`, `username`, `password`, and `database`. Use separate Neo4j users where the Aura tier supports fine-grained privileges. No Runtime or Lambda ever accepts database credentials as prompt or tool input. Labs 1 through 4 and Lab 6 run locally against the standard `NEO4J_*` values.
+- **One Secrets Manager secret for the deployed path.** `provision` creates the command secret the reservation Lambda reads, holding `uri`, `username`, `password`, and `database`, and writes its ARN into the repo-root `.env` as `NEO4J_COMMAND_SECRET_ID`. The deployed Runtime does not read a secret: it receives the same `NEO4J_*` values as container environment variables at launch, and its execution role grants no Secrets Manager access, so the Lambda's write credential is the one the Runtime cannot see. There is no `NEO4J_READ_SECRET_ID` in the shipped path and nothing to create by hand. Labs 1 through 4 and Lab 6 run locally against the standard `NEO4J_*` values. No Runtime or Lambda ever accepts database credentials as prompt or tool input.
+- **Bedrock on-demand quotas, if you are running a room.** The two Lab 1 models bill and throttle per region per account, and a lite build is roughly 33 extraction calls plus 30 embedding calls per participant, all starting within a minute of each other. Check the requests-per-minute and tokens-per-minute quotas for `us.anthropic.claude-sonnet-5` and `amazon.nova-2-multimodal-embeddings-v1:0` in the Service Quotas console for the region `AWS_REGION` names, and request an increase before the event if the room is large. The Bedrock clients retry with adaptive rate limiting, which absorbs throttling rather than failing on it, so the symptom in the room is a build that crawls rather than one that errors. Pre-building the graph before the session removes this risk entirely.
 
 Keep participant setup inside 30 minutes. The way to hit that is to finish Lab 0 before the session and to have the graph already built, because Lab 1's build is deliberately live and takes as long as it takes.
 
@@ -96,7 +97,7 @@ Run these from the repository root, in order, on the machine and account you wil
    uv run prepare_graph.py --check-only
    ```
 
-   Read-only. It verifies the `hotel_chunk_embeddings` vector index and the `hotel_chunk_fulltext` full-text index, reports document and chunk counts against the selected mode, and names any missing demo-critical source file. It exits nonzero when the graph is not ready. Drop `--check-only` and pass `--mode lite` to build what is missing.
+   Read-only. It verifies the `hotel_chunk_embeddings` vector index and the `hotel_chunk_fulltext` full-text index, reports document and chunk counts against the selected mode, and names any missing required source file. It exits nonzero when the graph is not ready. Drop `--check-only` and pass `--mode lite` to build what is missing.
 3. **The seeded rule, the fixture identities, and the constraints.** Step 7 of `1.1_build_graph.ipynb` calls `apply_lab4_fixtures` from `workshop.graph_setup`, which seeds the fixture hotel IDs, the `demo-06-maximum-guests` `Rule` node, and three uniqueness constraints, then asserts readiness. This is graph-owned data rather than extracted data, and it is `MERGE` and `SET` throughout, so running it twice changes nothing. Without it Lab 4 opens onto an unprepared graph. Confirm it with Lab 4's suite:
 
    ```bash
@@ -121,7 +122,7 @@ Run these from the repository root, in order, on the machine and account you wil
 
    Both flags touch real, billable AWS resources. The tagging step in `5.1_agentcore_deploy.ipynb` is what makes teardown possible, because the starter toolkit creates the ECR repository, the CodeBuild project, and the Runtime without forwarding tags. Skipping it makes `workshop_cleanup.py` report them as `UNTAGGED_BLOCKED` and exit nonzero while the infrastructure keeps billing.
 
-Two notes on running from a fresh clone. Register the `nbstripout` git filter once, with `pip install nbstripout && nbstripout --install` from the repository root, or every `.ipynb` checkout runs against an undefined filter. And run only one Lab 1 build at a time: each build clears the graph before it starts, so two overlapping builds wipe each other mid-flight and the document-count assertion fails with a count that keeps changing. On macOS, wrap a long build in `caffeinate -i -s`, because sleep kills it and closing the lid still sleeps the machine.
+Two notes on running from a fresh clone. Register the `nbstripout` git filter once, with `uv tool install nbstripout && nbstripout --install` from the repository root, or every `.ipynb` checkout runs against an undefined filter. And run only one Lab 1 build at a time: each build clears the graph before it starts, so two overlapping builds wipe each other mid-flight and the document-count assertion fails with a count that keeps changing. On macOS, wrap a long build in `caffeinate -i -s`, because sleep kills it and closing the lid still sleeps the machine.
 
 ## Cost and teardown
 
@@ -137,3 +138,9 @@ Teardown is two halves, tagged differently. Each one leaves the other billing if
 Cleanup is tag-scoped and refuses to guess. An untagged resource under a workshop-looking name is reported as `UNTAGGED_BLOCKED` and the run fails rather than deleting it. Treat both halves as destructive and confirm scope before running either outside a disposable sandbox account.
 
 The Neo4j database is terminated separately. Aura is not an AWS resource in the account, so nothing in the repository can reach it. Delete the instance from the Aura console when the event is over.
+
+## Going further
+
+Questions a room asks that the shipped path deliberately does not answer.
+
+**Two Neo4j identities on two secrets.** The workshop runs one Neo4j user. The stronger production boundary splits it: a read-only user for the Runtime and a write-scoped user for the reservation Lambda, each in its own Secrets Manager secret, so a compromised Runtime cannot reach the write credential at all. That form needs an Aura tier with fine-grained privileges and a second `NEO4J_READ_SECRET_ID`, and it is written up in [`../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md`](../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md). It is a good answer to give when asked, and a bad thing to add to a 30-minute setup.

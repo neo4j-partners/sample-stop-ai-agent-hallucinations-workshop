@@ -2,7 +2,7 @@
 
 # Lab 3: Agents and Tools
 
-Lab 2 produced a retriever that returns connected facts. Lab 3 gives it a caller. One notebook covers the [Strands Agents](https://strandsagents.com) concepts the rest of the workshop depends on: an agent, tools behind the `@tool` decorator, lifecycle hooks that block a tool call the model already decided to make, and a multi-agent swarm. It closes by assembling `hotel_agent`, the one named agent Labs 4 and 5 carry forward.
+Lab 2 produced a retriever that returns connected facts. Lab 3 gives it a caller. One notebook covers the [Strands Agents](https://strandsagents.com) concepts the rest of the workshop depends on: an agent, the two ways to pin its model, tools behind the `@tool` decorator, and lifecycle hooks that block a tool call the model already decided to make. It closes by assembling `hotel_agent`, the one named agent Labs 4 and 5 carry forward.
 
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://python.org)
 [![Strands Agents](https://img.shields.io/badge/Strands_Agents-1.27+-00B4D8.svg?style=flat)](https://strandsagents.com)
@@ -12,28 +12,28 @@ Lab 2 produced a retriever that returns connected facts. Lab 3 gives it a caller
 **At a Glance**
 - **Failure it prevents:** an agent that answers about a hotel from its own priors instead of calling a grounded tool.
 - **Neo4j:** the Lab 2 `HybridCypherRetriever` reached from inside a Strands `@tool`. No new graph structure is added.
-- **AWS:** Bedrock Claude Sonnet 5 runs every agent turn, tool selection, and swarm handoff.
+- **AWS:** Bedrock Claude Sonnet 5 runs every agent turn and every tool selection.
 - **You'll build:** small agents for each concept, then `hotel_agent`, carrying the real retriever tool and a hook-guarded booking tool.
 
-> **Where this is going.** Sections 1 through 5 each build a small agent to make one point. Section 6 assembles `hotel_agent` from three of those pieces, and Lab 4 registers the reservation write onto that agent by name.
+> **Where this is going.** Sections 1 through 4 each build a small agent to make one point. Section 5 assembles `hotel_agent` from three of those pieces, and Lab 4 rebuilds an agent under that same name with the reservation write added.
 
 ---
 
 ## The one notebook
 
-`3.1_strands_primer.ipynb` has 26 cells. Each teaching section builds its own agent rather than adding tools to a single agent that grows through the notebook, so a section can be read and run on its own. The closing section is the exception: it deliberately takes three pieces from earlier sections and drops the rest. The Summary table is the last cell, after that closing section.
+`3.1_strands_primer.ipynb` has 20 cells and five sections. Each teaching section builds its own agent rather than adding tools to a single agent that grows through the notebook, so a section can be read and run on its own. The closing section is the exception: it deliberately takes three pieces from earlier sections and drops the rest. The Summary table is the last cell, after that closing section.
 
 Every agent in the notebook is built with an explicit `model`. Cell 1 binds `MODEL_ID`, which reads the `MODEL_ID` environment variable and defaults to `us.anthropic.claude-sonnet-5`, and each `Agent(...)` passes it. Strands has a default model of its own, so an agent built without `model` runs that one instead, silently and on a different Claude version than the rest of the workshop.
 
 | Section | What it builds | What carries forward |
 |---------|----------------|----------------------|
-| 1. Creating an Agent | `agent_travel`, a travel assistant with a system prompt and no tools | The `Agent` constructor and the pinned `MODEL_ID` |
-| 2. Model Providers | `agent_bedrock`, taking the model id as a string, and `agent_specific`, taking a `BedrockModel` built from the same id | The two ways to pin the model `hotel_agent` uses |
+| 1. Creating an Agent | `agent_travel`, a travel assistant with a system prompt and no tools, taking the model id as a string | The `Agent` constructor and the pinned `MODEL_ID` |
+| 2. Model Providers | `agent_specific`, taking a `BedrockModel` built from the same id | The object form of the model, which is what Labs 4 and 5 use |
 | 3. Creating Tools | `agent_tools`, with three `@tool` functions: `search_hotels`, `book_hotel`, and `search_hotel_knowledge_tool` | `search_hotel_knowledge_tool` |
-| 3.5. Token Counting | `agent_metrics`, reading `result.metrics.accumulated_usage` for input, output, and total tokens | Nothing. Useful in any lab where cost matters |
 | 4. Lifecycle Hooks | `book_room`, `MaxGuestsHook`, and the pair `agent_no_hook` and `agent_with_hook` | `MaxGuestsHook` and `book_room` |
-| 5. Multi-Agent Swarms | `Swarm(nodes=[executor, validator, critic], max_handoffs=5)` over a `lookup_hotel` tool | Nothing. The swarm stays in this notebook |
-| 6. Assembling `hotel_agent` | `hotel_agent`, with the retriever tool, `book_room`, and `MaxGuestsHook` attached | Labs 4 and 5 |
+| 5. Assembling `hotel_agent` | `hotel_agent`, with the retriever tool, `book_room`, and `MaxGuestsHook` attached | Labs 4 and 5 |
+
+Two sections that earlier drafts carried are gone. A multi-agent swarm asserted a three-node handoff outcome the runtime does not reliably produce and never said when a swarm beats one agent. A token-counting section read `AgentResult.metrics` with no decision hanging off the number. Both cost Bedrock calls and neither fed anything downstream. Token accounting belongs in [the Strands metrics documentation](https://strandsagents.com/docs/user-guide/concepts/agents/metrics/) and swarms in [the multi-agent documentation](https://strandsagents.com/docs/user-guide/concepts/multi-agent/), and both are worth reading once you have a case for them.
 
 ---
 
@@ -50,7 +50,9 @@ def search_hotel_knowledge_tool(query: str) -> str:
     return json.dumps(search_hotel_knowledge(query), ensure_ascii=False)
 ```
 
-`search_hotel_knowledge` is the frozen one-field contract from the shared `workshop` package. It runs the `HybridCypherRetriever` over the vector and full-text indexes, applies the one reviewed Cypher traversal, and returns bounded JSON facts rather than prose: chunk evidence, the hybrid score, the query terms found verbatim in that evidence, and the hotel's stable `hotel_id`, name, address, guest rating, and amenities. The tool exposes `query` and nothing else, so the model cannot pick a retriever, a ranker, or a result count.
+`search_hotel_knowledge` is the frozen one-field contract from the shared `workshop` package. It runs the `HybridCypherRetriever` over the vector and full-text indexes, applies the one reviewed Cypher traversal, and returns bounded JSON facts rather than prose: chunk evidence, the hybrid score, the query terms found verbatim in that evidence, and the hotel's stable `hotel_id`, name, address, guest rating, and amenities. The tool exposes `query` and nothing else, so the model cannot pick a retriever, select a ranker, set an alpha, or ask for a different result count.
+
+That ceiling is the argument, not a shortcut, and section 3's markdown makes it in the notebook as well. Every extra field on a tool signature moves a decision from the engineers who reviewed the retrieval path to a model that will improvise one at run time, and a retrieval strategy chosen per call is a retrieval strategy nobody can reproduce when an answer comes out wrong. Holding the signature at one field is also what makes the tool portable: Lab 4 rebuilds the agent and Lab 5 deploys it to AgentCore Runtime, and neither one edits this function, because there is no knob on it to retune.
 
 The three tests in section 3 read as a set. Test 1 asks for hotels in Lisbon under $100 and the agent calls `search_hotels`. Test 2 asks what amenities AnyCompany Cairo Nile View has and the agent calls `search_hotel_knowledge_tool` instead. Test 3 books a room and the agent calls `book_hotel`. Comparing the answers from tests 1 and 2 is the point: one is invented, one came out of the graph.
 
@@ -74,9 +76,9 @@ Note where the number is. The limit of 10 is a Python literal inside `MaxGuestsH
 
 ---
 
-## Section 6: `hotel_agent`
+## Section 5: `hotel_agent`
 
-The closing section assembles the agent the rest of the workshop uses. It takes exactly three pieces from the primer, the real retriever tool from section 3 and the `book_room` tool and the hook from section 4, and leaves the simulated tools and the swarm behind:
+The closing section assembles the agent the rest of the workshop uses. It takes exactly three pieces from the primer, the real retriever tool from section 3 and the `book_room` tool and the hook from section 4, and leaves the two simulated tools behind:
 
 ```python
 hotel_agent = Agent(
@@ -92,13 +94,13 @@ hotel_agent = Agent(
 
 Two questions close the notebook. The first is the workshop's hero question about amenities and guest rating for AnyCompany Cairo Nile View, which the graph can answer. The second asks to book that hotel for 15 guests, which `MaxGuestsHook` cancels before `book_room` runs.
 
-Lab 4 registers `create_reservation_request` onto this same `hotel_agent` by name, which is what makes Labs 3 and 4 one story rather than two.
+Lab 4 rebuilds an agent under the same name, `hotel_agent`, with three changes to what you see here. The reservation write joins the toolset as `create_reservation_request_tool`, wrapping the idempotent command. `MaxGuestsHook` and `book_room` come off, because the limit the hook enforced moves into the graph and the command reads it inside the write transaction. The retriever tool crosses unchanged, imported from the same shared package by the same name. Reading the two agents side by side is what makes Labs 3 and 4 one story rather than two: the tool that stayed identical is the one whose contract was never widened.
 
 ---
 
 ## Running offline
 
-Cell 1 binds `MODEL_ID` and checks the environment once, setting two flags. `AGENT_READY` is true when boto3 finds AWS credentials. `GRAPH_READY` additionally requires `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. Every cell that invokes a model is guarded by one of them and prints a skip message instead of raising, so the notebook runs top to bottom with no credentials at all. Sections 1 through 5 still construct their agents while doing so, since constructing an `Agent` makes no service call. Section 6 is the exception: `hotel_agent` is built inside the `AGENT_READY` branch, so with no credentials it is never constructed at all and the two cells that follow skip as well. The two cells that use the real retriever are the ones gated on `GRAPH_READY`.
+Cell 1 binds `MODEL_ID` and checks the environment once, setting two flags. `AGENT_READY` is true when boto3 finds AWS credentials. `GRAPH_READY` additionally requires `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. Every cell that invokes a model is guarded by one of them and prints a skip message instead of raising, so the notebook runs top to bottom with no credentials at all. Sections 1 through 4 still construct their agents while doing so, since constructing an `Agent` makes no service call. Section 5 is the exception: `hotel_agent` is built inside the `AGENT_READY` branch, so with no credentials it is never constructed at all and the two cells that follow skip as well. Three cells reach the real retriever and all three are gated on `GRAPH_READY`: section 3's Test 2, and both of section 5's questions. The second of those is a booking, but `hotel_agent` is told to look a hotel up before it books, so it needs the graph too.
 
 ---
 
@@ -118,7 +120,7 @@ cd 03-agents-and-tools
 uv venv && uv pip install -r requirements.txt
 ```
 
-`requirements.txt` declares two requirements: `-e ../workshop`, which brings the retriever this lab puts behind `@tool`, and `strands-agents>=1.27.0`. The shared package supplies neo4j, neo4j-graphrag, and boto3.
+`requirements.txt` declares two requirements: `-e ../workshop`, which brings the retriever this lab puts behind `@tool`, and `strands-agents>=1.27.0,<2.0.0`. The shared package supplies neo4j, neo4j-graphrag, and boto3. The upper bound is deliberate: the 1.x line has already renamed a hook API once, and section 4 is written against `BeforeToolCallEvent`. The lab was last tested against 1.52.0.
 
 ### Step 2: Confirm the retriever imports
 
@@ -160,15 +162,16 @@ Run that from the repository root. The root [README](../README.md) documents how
 - [Strands Agents documentation](https://strandsagents.com)
 - [Custom tools](https://strandsagents.com/docs/user-guide/concepts/tools/custom-tools/)
 - [Hooks](https://strandsagents.com/docs/user-guide/concepts/agents/hooks/)
-- [Multi-agent](https://strandsagents.com/docs/user-guide/concepts/multi-agent/)
-- [Agent metrics](https://strandsagents.com/docs/user-guide/concepts/agents/metrics/)
+- [Model providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/)
+- [Multi-agent](https://strandsagents.com/docs/user-guide/concepts/multi-agent/), for the swarm pattern this lab no longer ships
+- [Agent metrics](https://strandsagents.com/docs/user-guide/concepts/agents/metrics/), for the token counting this lab no longer ships
 
 ---
 
 ## Navigation
 
 - **Previous:** [Lab 2: Retrieval](../02-retrieval/)
-- **Next:** [Lab 4: The grounded write](../04-grounded-write/), which registers the idempotent reservation write onto `hotel_agent` and replaces the hook's Python literal with a rule read from the graph.
+- **Next:** [Lab 4: The grounded write](../04-grounded-write/), which rebuilds `hotel_agent` with the idempotent reservation write as a tool and replaces the hook's Python literal with a rule read from the graph.
 
 ---
 
@@ -184,4 +187,4 @@ If you discover a potential security issue in this project, notify AWS/Amazon Se
 
 This library is licensed under the MIT-0 License. See the [LICENSE](../LICENSE) file for details.
 
-> Last updated: August 2026 | Strands Agents 1.27+ | Python 3.12+
+> Last updated: August 2026 | Strands Agents 1.27+, tested against 1.52.0 | Python 3.12+

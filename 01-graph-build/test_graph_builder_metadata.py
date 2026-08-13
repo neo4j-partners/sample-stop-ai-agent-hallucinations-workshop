@@ -7,9 +7,16 @@ import os
 import unittest
 from pathlib import Path
 
+# `workshop.graph_connection` raises at import unless both are set, and this
+# test opens no connection, so placeholders are enough to reach `ingest`.
+os.environ.setdefault("NEO4J_URI", "bolt://test-only:7687")
 os.environ.setdefault("NEO4J_PASSWORD", "test-only")
 
 from graph_builder import ingest  # noqa: E402
+
+# `ingest` reads the document off disk, and `data/` is gitignored, so this test
+# needs the corpus extracted. It skips rather than fails on a fresh clone.
+SOURCE = Path(__file__).resolve().parent / "data" / "hotel-cairo-001.txt"
 
 
 class RecordingPipeline:
@@ -21,13 +28,16 @@ class RecordingPipeline:
 
 
 class GraphBuilderMetadataTests(unittest.TestCase):
+    @unittest.skipUnless(
+        SOURCE.exists(), f"{SOURCE.name} is not extracted; unzip hotel-faqs.zip first"
+    )
     def test_ingest_preserves_source_filename_on_document(self) -> None:
         pipeline = RecordingPipeline()
-        source = Path("data/hotel-cairo-001.txt")
+        source = SOURCE
 
-        errors = asyncio.run(ingest(pipeline, [source]))  # type: ignore[arg-type]
+        failures = asyncio.run(ingest(pipeline, [source]))  # type: ignore[arg-type]
 
-        self.assertEqual(errors, 0)
+        self.assertEqual(failures, [])
         self.assertEqual(len(pipeline.calls), 1)
         self.assertEqual(pipeline.calls[0]["file_path"], source.name)
         self.assertEqual(

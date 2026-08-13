@@ -39,7 +39,14 @@ available hotel knowledge.
 # ``node`` and ``score`` are supplied by HybridCypherRetriever. The traversal
 # is reviewed, static Cypher: no query text is interpolated and no model writes
 # or generates any part of it.
-RETRIEVAL_QUERY = """
+#
+# The only two interpolated values are MAX_AMENITIES and MAX_EVIDENCE_CHARS,
+# the named constants the rest of this module already trims to. Written as
+# literals they agreed with the constants by coincidence, so changing a constant
+# left the query returning the old bound. Both are module-level ints, never
+# caller input. The doubled braces are the f-string escape for the Cypher
+# subquery block.
+RETRIEVAL_QUERY = f"""
 OPTIONAL MATCH (node:Chunk)<-[:FROM_CHUNK]-(candidate:Hotel)
 WITH node, score, candidate
 WHERE score IS NOT NULL
@@ -47,15 +54,15 @@ ORDER BY score DESC,
          coalesce(candidate.hotel_id, '\uffff'),
          coalesce(candidate.name, '\uffff')
 WITH node, score, head(collect(candidate)) AS hotel
-CALL (hotel) {
+CALL (hotel) {{
     MATCH (hotel)-[:OFFERS_AMENITY]->(amenity:Amenity)
     WHERE amenity.name IS NOT NULL
     WITH DISTINCT amenity.name AS amenity_name
     ORDER BY amenity_name
-    LIMIT 12
+    LIMIT {contracts.MAX_AMENITIES}
     RETURN collect(amenity_name) AS amenities
-}
-RETURN left(coalesce(node.text, ''), 1200) AS chunk_evidence,
+}}
+RETURN left(coalesce(node.text, ''), {MAX_EVIDENCE_CHARS}) AS chunk_evidence,
        score AS combined_score,
        hotel.hotel_id AS hotel_id,
        hotel.name AS hotel_name,
@@ -72,7 +79,12 @@ _TERM_PATTERN = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*", re.UNICODE)
 
 @dataclass(frozen=True)
 class Neo4jConfig:
-    """Connection values shared by local and deployed retrieval paths."""
+    """Connection values shared by local and deployed retrieval paths.
+
+    ``reservation_command.Neo4jCommandConfig`` is a near-duplicate of this
+    class, and merging the two would break the reservation Lambda. That module
+    documents why.
+    """
 
     uri: str
     username: str

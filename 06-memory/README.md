@@ -24,16 +24,16 @@
 
 | Section | What it does |
 |---------|--------------|
-| 1. Configure one isolated run | Builds actor and session IDs from a fresh run ID under the `demo08-` namespace, so rerunning cannot append to an earlier transcript |
+| 1. Configure one isolated run | Checks Titan access, then builds actor, session, and preference-category IDs from a fresh run ID under the `demo08-` namespace and prints the run prefix, so rerunning cannot append to an earlier transcript |
 | 2. Persist the preference statement | Verifies the Lab 1 hero `Hotel`, then writes two fixture messages for actor A |
-| 3. Write one explicit preference and its provenance | Creates the actor-owned `Preference` in this run's `category` namespace, then adds `DERIVED_FROM` to its source message and `ABOUT_HOTEL` to the existing `Hotel` |
-| 4. Recall in a fresh session and isolate a second actor | Opens a new session for actor A, then gives actor B the opposite preference about the same `Hotel`. The same actor-anchored traversal, one parameter apart, returns each actor exactly their own row |
-| 5. Inspect the complete provenance path | Walks backward along `DERIVED_FROM` to the source message and its conversation, forward along `ABOUT_HOTEL` to the canonical `Hotel`, then back down `ABOUT_HOTEL` to every memory about that hotel. Closes with a Neo4j Browser query that renders the subgraph |
-| Mark this run for cleanup | Stamps the run's records with `workshop_owner` so cleanup has a second handle beyond the ID prefix |
-| Choosing a memory architecture | The closing comparison against AgentCore Memory |
+| 3. Write one explicit preference and its provenance | Creates the actor-owned `Preference` in actor A's `category` namespace, then adds `DERIVED_FROM` to its source message and `ABOUT_HOTEL` to the existing `Hotel` |
+| 4. Recall for the same actor, and isolate a second actor | Reads actor A's preference back through a traversal that takes no session parameter, then gives actor B the opposite preference about the same `Hotel` under actor B's own category. The same traversal, one parameter apart, returns each actor exactly their own row |
+| 5. Inspect the complete provenance path | Walks backward along `DERIVED_FROM` to the source message and its conversation, forward along `ABOUT_HOTEL` to the canonical `Hotel`, then back down `ABOUT_HOTEL` to every memory about that hotel. Closes with a run-scoped Neo4j Browser query that renders the subgraph |
+| Mark this run for scoped cleanup | Stamps the run's records with `workshop_owner` so cleanup has a second handle beyond the ID prefix, then closes the memory client |
+| Choosing a memory architecture | The closing comparison against AgentCore Memory, and the command that removes this run |
 | Where this leaves you | The workshop's through-line applied one last time, and where to go next |
 
-Each live cell opens and closes its own memory client, so a failure in a later cell cannot leak a connection. Every live cell skips cleanly when Neo4j or AWS credentials are absent.
+One memory client is opened the first time a live cell needs it, reused by the later cells, and closed by the tagging section, so a rerun of any single cell reconnects only if the client was closed. Every live cell skips cleanly when Neo4j or AWS credentials are absent, and section 1 names the cause rather than letting an unenabled Titan model surface as a raw `AccessDeniedException` from inside the library.
 
 **The story uses fixture messages, not another model call.** Extraction is switched off through `ExtractorType.NONE` and every message is written with `extraction_mode="skip"`, so the assertions are deterministic and the lesson stays on the memory graph. Wiring the same pattern around the Lab 3 `hotel_agent` is a straightforward extension and is not required here.
 
@@ -45,7 +45,7 @@ When a preference is a node in the same graph as the hotels, it is traversable i
 
 | Dimension | AgentCore Memory | Neo4j graph memory, this lab |
 |-----------|------------------|------------------------------|
-| How memory is written | Raw events, plus optional managed extraction into long-term records. This lab turns extraction off and writes explicitly | Explicit application writes |
+| How memory is written | Raw events, plus optional managed extraction into long-term records | Explicit application writes, with extraction switched off through `ExtractorType.NONE` |
 | When it is recallable | Raw event records immediately; extracted long-term records after asynchronous extraction | Immediately after the write |
 | Inspectability | Retrieved through a service API | Queryable graph with source provenance |
 | Domain linking | Separate from domain data | Workshop-owned edge to the real `Hotel` |
@@ -61,6 +61,7 @@ Choose AgentCore Memory for managed extraction and managed operations. Choose gr
 - **The application must still authenticate actors and authorize session IDs.** Multi-tenant mode checks that an identifier was supplied. It never checks that the caller is entitled to it. Binding actor and session IDs to an authenticated caller is application work.
 - **The library's semantic searches are store-wide in the pinned 0.5.0 release.** `SEARCH_PREFERENCES_BY_EMBEDDING` calls `db.index.vector.queryNodes('preference_embedding_idx', ...)` with no owner filter, so a similarity hit can belong to any actor. This lab therefore does not use semantic search as an isolation boundary.
 - **Recall starts at the selected `User` instead.** `get_actor_preferences_for_hotel` matches `(:User {identifier: $user_identifier})-[:HAS_PREFERENCE]->(:Preference)-[:ABOUT_HOTEL]->(:Hotel {name: $hotel_name})`, so a preference the actor does not own is not reachable by the query at all. There is nothing to filter out, and so nothing to forget to filter. That is why section 4's two actors, who differ in nothing else the store can see, each get exactly their own row.
+- **The two actors write under two `category` values, and that is load-bearing.** `LongTermMemory.add_preference` deduplicates inside a category: it runs a vector search over `preference_embedding_idx` filtered to `node.category` and, at cosine 0.95 or above, links the caller to the preference that is already there rather than creating a node. Section 4's actors state near-paraphrases of the same sentence about the same hotel, which is precisely the case that merges. `preference_category(RUN_PREFIX, "alice")` and `preference_category(RUN_PREFIX, "blake")` keep each actor outside the other's deduplication scope, both still sit under `hotels-<run prefix>` so cleanup needs one handle, and section 4 asserts the two `Preference` IDs differ so a regression fails loudly instead of printing actor B holding actor A's text.
 
 ## Configuration
 
@@ -94,7 +95,7 @@ Run the offline tests, from inside `06-memory/`:
 uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-27 tests in `test_memory_helpers.py` cover configuration loading, the memory settings contract, the actor-scoped read, the tagging query, the scoping of every cleanup query, and the hotel-count guard that makes cleanup abort if the hotel graph moved. They need no credentials and touch no graph.
+40 tests in `test_memory_helpers.py` cover configuration loading, the memory settings contract, the actor-scoped read, the tagging query, the per-actor preference categories, the scoping of every cleanup query, the scope the cleanup command line resolves to, and the hotel-count guard that makes cleanup abort if the hotel graph moved. They need no credentials and touch no graph.
 
 Check the live memory foundations before teaching from this lab, from inside `06-memory/`:
 
@@ -106,19 +107,27 @@ The smoke test proves four things against the real instance: an unscoped write i
 
 ## Cleanup
 
-One notebook run writes eleven nodes: two `User` nodes, three `Conversation` nodes, four `Message` nodes, and two `Preference` nodes, one per actor. Reset the lab whenever those accumulate, from inside `06-memory/`:
+One notebook run writes eleven nodes: two `User` nodes, three `Conversation` nodes, four `Message` nodes, and two `Preference` nodes, one per actor. Remove your own run, from inside `06-memory/`, with the prefix section 1 printed:
 
 ```bash
-uv run --with-requirements requirements.txt python cleanup_memory.py
+uv run --with-requirements requirements.txt python cleanup_memory.py --run-prefix demo08-xxxxxxxx-
 ```
 
-**It removes every Lab 6 run on the instance, not just yours.** The session and user sweeps match the bare `demo08-` prefix with no run ID in it, which is what makes an interrupted earlier run recoverable. The consequence is that on a Neo4j instance shared by several participants, whoever runs the script deletes everybody's Lab 6 records, including runs still in progress. On a shared instance, wait until everyone is finished. Run scoping exists in section 1 of the notebook precisely because instances get shared; cleanup deliberately does not use it.
+**Cleanup is scoped to one run, and that is the form to hand a room.** On a Neo4j instance shared by thirty participants, an instance-wide sweep run by whoever finishes first deletes everybody else's in-flight records. `--run-prefix` bounds both namespaces at once, the id prefix for sessions and users and the matching `hotels-` category prefix for preferences and provenance edges, so one participant's cleanup cannot reach another's. A prefix that does not start with `demo08-` is refused rather than swept, so a typo cannot reach records this lab never wrote.
 
-**What it removes:** workshop-owned `ABOUT_HOTEL` relationships, then `Conversation` and `Message` nodes whose `session_id` starts with `demo08-`, then `User` nodes whose `identifier` starts with `demo08-`, then orphaned preferences, which are those tagged `neo4j-ftw-demo-8` or whose `category` starts with `hotels-demo08-` and that no user still owns.
+Add `--dry-run` to either form to count what would go and delete nothing:
+
+```bash
+uv run --with-requirements requirements.txt python cleanup_memory.py --run-prefix demo08-xxxxxxxx- --dry-run
+```
+
+**`--all` widens the sweep to every Lab 6 run on the instance.** That is what makes an interrupted earlier run whose prefix nobody wrote down recoverable, and it is a facilitator action for when the room is finished rather than a participant one. It asks for a typed confirmation first, and running with no scope at all deletes nothing and exits 2 with the two forms printed.
+
+**What it removes,** within the chosen scope: workshop-owned `ABOUT_HOTEL` relationships whose `Preference` is in the swept category namespace, then `Conversation` and `Message` nodes whose `session_id` starts with the swept id prefix, then `User` nodes whose `identifier` starts with it, then orphaned preferences, which are those tagged `neo4j-ftw-demo-8` or whose `category` starts with the swept category prefix and that no user still owns.
 
 **What it never touches:** `Hotel` nodes, the hotel chunk indexes, and any other lab's data. The script counts hotels before and after and raises an `AssertionError` if the number moves. The library-managed memory vector indexes are left in place: they are shared infrastructure, they cost nothing while empty, and the smoke test checks them.
 
-**Recovering from an interrupted run.** Every record this lab writes is namespaced from the moment it is created, while `workshop_owner` is only stamped by the notebook's second-to-last cell. A run that died before that cell is therefore still fully removable. Conversations, messages, and users carry the `demo08-` prefix in their identifiers. A `Preference` has no identifier of its own to carry it, so the namespace goes in its `category`, as `hotels-demo08-<run id>`. That matters more than it looks: by the time the preference sweep runs, the preceding sweeps have already removed the `ABOUT_HOTEL` edge, detach-deleted the `Message` behind `DERIVED_FROM`, and detach-deleted the owning `User`. Without the category handle an untagged preference would be left at zero degree with nothing able to find it, one per interrupted run. The ownership marker is a second handle, not the only one.
+**Recovering from an interrupted run.** Every record this lab writes is namespaced from the moment it is created, while `workshop_owner` is only stamped by the notebook's second-to-last cell. A run that died before that cell is therefore still fully removable. Conversations, messages, and users carry the `demo08-` prefix in their identifiers. A `Preference` has no identifier of its own to carry it, so the namespace goes in its `category`, as `hotels-demo08-<run id>-<actor>`, which one `hotels-demo08-<run id>` prefix reaches for both actors. That matters more than it looks: by the time the preference sweep runs, the preceding sweeps have already removed the `ABOUT_HOTEL` edge, detach-deleted the `Message` behind `DERIVED_FROM`, and detach-deleted the owning `User`. Without the category handle an untagged preference would be left at zero degree with nothing able to find it, one per interrupted run. The ownership marker is a second handle, not the only one.
 
 **Do not rename the prefix.** `DEMO_ID_PREFIX = "demo08-"` in `memory_helpers.py` is the single definition; `cleanup_memory.py` imports it and `test_memory_helpers.py` asserts its value, so a rename propagates and fails loudly rather than silently orphaning records. The reason not to rename it is different: records already written to a shared instance under the old prefix stop matching the new one, and nothing in the lab can then find them. The digits are `08` because this lab was Demo 08 before the renumber to six labs. The value is arbitrary, only its stability matters, and it is participant-visible in section 5's output and in the Neo4j Browser query. The paired constants are `WORKSHOP_OWNER = "neo4j-ftw-demo-8"` and `PREFERENCE_CATEGORY_PREFIX`, which is derived from `DEMO_ID_PREFIX` rather than restated.
 
@@ -129,10 +138,10 @@ uv run --with-requirements requirements.txt python cleanup_memory.py
 | File | Purpose |
 |------|---------|
 | `6.1_neo4j_agent_memory.ipynb` | The five-step participant story |
-| `memory_helpers.py` | Configuration loading, the pinned memory client and its explicit Titan embedder, the namespace constants, the actor-scoped read, the two relationship writes, and the run-tagging query |
+| `memory_helpers.py` | Configuration loading, the Titan readiness check, the pinned memory client and its explicit Titan embedder, the namespace constants and per-actor categories, the actor-scoped read, the two relationship writes, and the run-tagging query |
 | `smoke_test.py` | Live connection, multi-tenant, vector-index, and embedding-width checks |
-| `cleanup_memory.py` | Prefix- and owner-scoped cleanup that never mutates `Hotel` nodes |
-| `test_memory_helpers.py` | 27 offline tests over configuration, helpers, cleanup scope, and the hotel-count guard |
+| `cleanup_memory.py` | Run-scoped cleanup, with an instance-wide sweep behind a typed confirmation, that never mutates `Hotel` nodes |
+| `test_memory_helpers.py` | 40 offline tests over configuration, helpers, preference categories, cleanup scope, and the hotel-count guard |
 | `requirements.txt` | The shared `workshop` package plus `neo4j-agent-memory[bedrock]==0.5.0` |
 
 ## Troubleshooting
@@ -153,13 +162,13 @@ It is idempotent, builds the 30-document corpus only if the graph is not already
 
 If the count is above one, an interrupted or overlapping Lab 1 build is the usual cause. Run one build, alone, and let it finish: `uv run prepare_graph.py --mode lite --rebuild`.
 
-**An `AccessDeniedException` on the first memory write.** Memory embeddings need `amazon.titan-embed-text-v2:0` enabled in `AWS_REGION`, and that is a different model from the Nova 2 embeddings Lab 1 uses. Lab 1 succeeding proves nothing about Titan access. Enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) for the region in your `.env`, then re-run.
+**Section 1 reports that Titan Text Embeddings V2 is not usable.** Memory embeddings need `amazon.titan-embed-text-v2:0` enabled in `AWS_REGION`, and that is a different model from the Nova 2 embeddings Lab 1 uses. Lab 1 succeeding proves nothing about Titan access. Enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) for the region in your `.env`, then re-run section 1. The check embeds one short probe string so the cause is named up front rather than surfacing as a raw `AccessDeniedException` from inside the library at the first write in section 2.
 
 **Connecting raises an embedding dimension mismatch.** Memory vector indexes already exist on this instance at a different width, usually 1536 from an earlier run configured for OpenAI defaults. Run `smoke_test.py`, which reports the dimensions it found on `message_embedding_idx` and `preference_embedding_idx`. Drop the two mismatched indexes and let the next connect recreate them at 1024.
 
 **Recall returns nothing even though the write succeeded.** Check that the memory client was built through `build_memory_client`. A client constructed without the explicit Titan embedder writes zero-length vectors and raises no error.
 
-**Leftover memory nodes from an interrupted run.** Run `cleanup_memory.py`. It removes namespaced records whether or not the tagging cell ever ran, so an interrupted notebook needs no manual repair. If cleanup itself fails with a changed hotel count, stop and investigate before re-running: something outside this lab is writing `Hotel` nodes, and cleanup deliberately refuses to continue.
+**Leftover memory nodes from an interrupted run.** Run `cleanup_memory.py --run-prefix` with the prefix section 1 printed. It removes namespaced records whether or not the tagging cell ever ran, so an interrupted notebook needs no manual repair. When the prefix was never written down, `--all` finds it, and that one waits until the room is finished because it reaches every participant's records. If cleanup itself fails with a changed hotel count, stop and investigate before re-running: something outside this lab is writing `Hotel` nodes, and cleanup deliberately refuses to continue.
 
 **Every cell prints a skip message.** Neo4j or AWS credentials are missing. This is the intended offline behavior, and it is what keeps the notebook green in the repository's credential-free acceptance run.
 

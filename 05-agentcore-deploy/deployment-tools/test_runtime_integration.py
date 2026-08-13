@@ -92,7 +92,7 @@ class RuntimeIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty prompt"):
             booking_agent._prompt({"prompt": " "})
 
-    def test_command_guard_requires_and_preserves_caller_request_id(self) -> None:
+    def test_command_hooks_pin_request_id_and_capture_the_verdict(self) -> None:
         request_id = "a8b3c4d5-1234-4abc-8def-0123456789ab"
 
         missing = SimpleNamespace(
@@ -124,6 +124,48 @@ class RuntimeIntegrationTests(unittest.TestCase):
         )
         booking_agent.ReservationRequestGuard(request_id)._validate(matching)
         self.assertIsNone(matching.cancel_tool)
+
+        # The verdict the Lambda computed has to reach the caller intact. A
+        # cancelled or broken call must not arrive looking like a rule
+        # rejection, which is the whole reason `command_result` exists.
+        recorder = booking_agent.CommandResultRecorder()
+        self.assertIsNone(recorder.last_result)
+
+        rejected = json.dumps(
+            {
+                "status": contracts.ReservationStatus.REJECTED.value,
+                "reason_code": contracts.ReservationReason.MAX_GUESTS_EXCEEDED.value,
+                "duplicate": False,
+            }
+        )
+        recorder._record(
+            SimpleNamespace(
+                tool_use={"name": booking_agent.GATEWAY_COMMAND_TOOL},
+                result={"status": "success", "content": [{"text": rejected}]},
+            )
+        )
+        self.assertEqual(
+            recorder.last_result["reason_code"],
+            contracts.ReservationReason.MAX_GUESTS_EXCEEDED.value,
+        )
+
+        recorder._record(
+            SimpleNamespace(
+                tool_use={"name": booking_agent.GATEWAY_COMMAND_TOOL},
+                result={"status": "error", "content": [{"text": "BLOCKED: nope"}]},
+            )
+        )
+        self.assertNotIn("reason_code", recorder.last_result)
+        self.assertEqual(recorder.last_result["tool_status"], "error")
+
+        recorder.last_result = None
+        recorder._record(
+            SimpleNamespace(
+                tool_use={"name": "search_hotel_knowledge"},
+                result={"status": "success", "content": [{"text": "{}"}]},
+            )
+        )
+        self.assertIsNone(recorder.last_result)
 
     def test_local_tool_returns_bounded_retrieval_as_json(self) -> None:
         evidence = [{"hotel_id": "fixture-id", "chunk_evidence": "grounded"}]
@@ -171,10 +213,18 @@ class RuntimeIntegrationTests(unittest.TestCase):
         self.assertIn("separate Neo4j users", deployment)
 
     def test_runtime_image_excludes_lambda_and_legacy_notebooks(self) -> None:
-        dockerignore = (DEMO_DIR / ".dockerignore").read_text(encoding="utf-8")
-        self.assertIn("lambda_tools/", dockerignore)
-        self.assertIn("*.ipynb", dockerignore)
-        self.assertIn("reservation_command.py", dockerignore)
+        # Read the active exclusion lines only. Asserting on the raw file text
+        # matched strings that appear solely inside comments, so deleting a
+        # comment failed this test and deleting a real rule did not.
+        raw = (DEMO_DIR / ".dockerignore").read_text(encoding="utf-8")
+        rules = {
+            line.strip()
+            for line in raw.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        self.assertIn("lambda_tools/", rules)
+        self.assertIn("*.ipynb", rules)
+        self.assertIn("test_*.py", rules)
 
 
 if __name__ == "__main__":

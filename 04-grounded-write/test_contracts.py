@@ -10,7 +10,7 @@ from typing import get_type_hints
 from workshop import contracts
 
 
-class Demo06ContractTests(unittest.TestCase):
+class FrozenContractTests(unittest.TestCase):
     def test_retrieval_contract_is_fixed_and_bounded(self) -> None:
         schema = contracts.retrieval_input_schema()
 

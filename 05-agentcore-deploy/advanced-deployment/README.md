@@ -33,6 +33,9 @@ query from this notebook, and differs in three ways:
 - **Each invocation carries its own session ID.** The `request_id`, not the
   session, is what ties two deliveries of one reservation request together.
 
-`5.3` reads `AGENT_RUNTIME_ARN`, which `5.1` prints and which
-`provision_agentcore.py` does not write to the root `.env`. Set it by hand, or
-every live cell skips.
+`5.3` reads `AGENT_RUNTIME_ARN` from the repository-root `.env`, and `5.1`
+writes it there when it launches, so a participant who has just run `5.1` has
+nothing to do. `provision_agentcore.py` does not write that key, because
+provisioning happens before there is an ARN to write. Set it by hand only when
+the Runtime was deployed from another machine or in an earlier session.
+Without it, every live cell skips.

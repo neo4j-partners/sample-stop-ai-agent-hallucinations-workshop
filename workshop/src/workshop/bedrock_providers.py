@@ -30,15 +30,29 @@ from workshop.retrieval_contract import (
 )
 
 
-# botocore defaults to a 60s read timeout and 5 attempts, so one hung call can
-# burn 300s. graph_builder wraps each document in a 180s asyncio.wait_for, and
-# that outer bound cannot govern a larger inner one: the timeout fires while the
-# worker thread keeps running underneath, because a thread cannot be cancelled.
+# botocore defaults to a 60s read timeout, so one hung call can burn minutes.
+# graph_builder wraps each document in a 180s asyncio.wait_for, and that outer
+# bound cannot govern a larger inner one: the timeout fires while the worker
+# thread keeps running underneath, because a thread cannot be cancelled.
 #
-# max_attempts counts retries, so this resolves to 3 total attempts.
-# Worst case is 3 x 45s plus backoff, roughly 140s, under the 180s bound.
-# Keep that inequality true if you change either number.
-BEDROCK_CONFIG = Config(read_timeout=45, retries={"max_attempts": 2})
+# Adaptive mode is what makes a room of thirty simultaneous Lab 1 builds
+# survivable. It adds a client-side rate limiter that slows requests down when
+# Bedrock starts returning throttling errors, instead of every participant
+# retrying into the same per-region on-demand quota at full speed.
+#
+# botocore reads max_attempts as a retry count and normalises it to
+# total_max_attempts, so 5 here is 6 total attempts. A throttling response comes
+# back fast and costs backoff rather than a full read timeout, so those extra
+# attempts are cheap in the case they exist for. The expensive case, six
+# consecutive sockets that hang for the full 45s, adds up to 270s and outlasts
+# the 180s per-document bound: the wait_for still fires and the build moves on,
+# while the worker thread underneath keeps running to its own end. That is the
+# trade being made here, throughput under throttling against a thread that can
+# outlive its document. Raise DOC_TIMEOUT_SECONDS or lower read_timeout if you
+# want the inner chain back inside the outer bound.
+BEDROCK_CONFIG = Config(
+    read_timeout=45, retries={"max_attempts": 5, "mode": "adaptive"}
+)
 
 # The one chat model the workshop runs on. Every lab that builds an agent or an
 # extraction LLM reads it from here rather than restating the literal, so a
@@ -112,6 +126,12 @@ class BedrockEmbeddings(Embedder):
         *,
         bedrock_client: Any | None = None,
     ):
+        # The embedding model and its width are frozen contract constants, not
+        # a preference, so unlike the chat model they take no environment
+        # override. Lab 1 writes the chunk vectors with these values and Labs 2
+        # onward query against them; an override would let the read path move
+        # while the stored vectors stayed put, which returns wrong results with
+        # no error.
         # Resolve the region inside the body: an os.environ default argument is
         # evaluated once at import, before the caller can set AWS_REGION.
         if region_name is None:
@@ -147,7 +167,7 @@ class BedrockLLM(LLMInterface):
 
     def __init__(
         self,
-        model_id: str = DEFAULT_MODEL_ID,
+        model_id: str | None = None,
         region_name: str | None = None,
         temperature: float | None = None,
         max_tokens: int = 4096,
@@ -156,7 +176,11 @@ class BedrockLLM(LLMInterface):
         # evaluated once at import, before the caller can set AWS_REGION.
         if region_name is None:
             region_name = os.environ.get("AWS_REGION", "us-east-1")
-        self.model_id = model_id
+        # Same reason, and it is the whole point of the MODEL_ID override:
+        # defaulting to the DEFAULT_MODEL_ID literal here would bind the model
+        # at import and leave Lab 1's extraction calls on the built-in one while
+        # every Strands agent in the tree honored the environment.
+        self.model_id = model_id or default_model_id()
         self.client = boto3.client(
             "bedrock-runtime", region_name=region_name, config=BEDROCK_CONFIG
         )

@@ -39,6 +39,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -62,11 +63,23 @@ ENV_FILE = REPO_ROOT / ".env"
 # step installs this package rather than copying named files.
 SHARED_PACKAGE = REPO_ROOT / "workshop"
 
+# Read the shared contracts from source instead of declaring `workshop` as a
+# dependency above. `workshop.contracts` and the one module it imports are pure
+# constants with no third-party imports, so this keeps the script's environment
+# at boto3 alone while still having exactly one definition of the values below.
+sys.path.insert(0, str(SHARED_PACKAGE / "src"))
+
+from workshop import contracts  # noqa: E402
+
+# `demo06` is a real provisioned identifier, not a stale label. Every resource
+# name and the owner tag key are built from it. Override it with DEMO06_PREFIX
+# to give one participant their own set of resources in a shared account; see
+# "Many participants, one account" in setup/README.md for the two other values
+# that have to move with it.
 PREFIX = os.environ.get("DEMO06_PREFIX", "demo06")
 TAG_KEY = f"{PREFIX}-agentcore"
 TAG_VALUE = "true"
 
-DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5"
 LAMBDA_RUNTIME = "python3.12"
 LAMBDA_ARCH = "arm64"  # Match the ARM64 AgentCore Runtime; Graviton price/perf.
 LAMBDA_HANDLER = "lambda_function.handler"
@@ -84,7 +97,14 @@ ENV_GATEWAY_URL = "AGENTCORE_GATEWAY_URL"
 ENV_RUNTIME_ROLE_ARN = "AGENTCORE_RUNTIME_ROLE_ARN"
 ENV_COMMAND_SECRET_ID = "NEO4J_COMMAND_SECRET_ID"
 MANAGED_ENV_KEYS = (ENV_GATEWAY_URL, ENV_RUNTIME_ROLE_ARN, ENV_COMMAND_SECRET_ID)
-ENV_HEADER = "# --- Demo 06 AgentCore deploy (written by setup/provision_agentcore.py) ---"
+ENV_HEADER = "# --- Lab 5 AgentCore deploy (written by setup/provision_agentcore.py) ---"
+# The header earlier versions wrote. `clear_env` matches both, so a teardown
+# that follows an older provision removes the old header instead of stranding
+# it in the participant's .env, and `upsert_env` does not stack a second one.
+ENV_HEADER_LEGACY = (
+    "# --- Demo 06 AgentCore deploy (written by setup/provision_agentcore.py) ---"
+)
+ENV_HEADERS = (ENV_HEADER, ENV_HEADER_LEGACY)
 
 
 # --------------------------------------------------------------------------- #
@@ -120,7 +140,6 @@ class Config:
     region: str
     account_id: str
     neo4j: Neo4jValues
-    model_id: str
 
     @property
     def secret_name(self) -> str:
@@ -145,6 +164,13 @@ class Config:
     @property
     def gateway_name(self) -> str:
         return f"{PREFIX}-gateway"
+
+    @property
+    def gateway_target_name(self) -> str:
+        # The sole target, and the half of the MCP tool name the deployed
+        # Runtime checks for. `deployment-tools/gateway_target.json` carries the
+        # default spelling; this property is what makes DEMO06_PREFIX reach it.
+        return f"{PREFIX}-reservation-request"
 
     @property
     def lambda_arn(self) -> str:
@@ -178,11 +204,16 @@ def load_env_file(path: Path) -> None:
 
 
 def resolve_config() -> Config:
-    """Read Neo4j and AWS values, refusing to run if Neo4j is missing."""
+    """Read Neo4j and AWS values, refusing to run if Neo4j is missing.
+
+    `NEO4J_DATABASE` is optional and defaults to `neo4j`, matching the root
+    README and `workshop.contracts.DEFAULT_NEO4J_DATABASE`. The other three
+    have no safe default, because they are what the command secret is made of.
+    """
     load_env_file(ENV_FILE)
     missing = [
         name
-        for name in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "NEO4J_DATABASE")
+        for name in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
         if not os.environ.get(name)
     ]
     if missing:
@@ -205,9 +236,10 @@ def resolve_config() -> Config:
             uri=os.environ["NEO4J_URI"],
             username=os.environ["NEO4J_USERNAME"],
             password=os.environ["NEO4J_PASSWORD"],
-            database=os.environ["NEO4J_DATABASE"],
+            database=(
+                os.environ.get("NEO4J_DATABASE") or contracts.DEFAULT_NEO4J_DATABASE
+            ),
         ),
-        model_id=os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
     )
 
 
@@ -229,7 +261,7 @@ def upsert_env(path: Path, values: dict[str, str]) -> None:
                 lines[index] = f"{key}={remaining.pop(key)}"
                 break
     if remaining:
-        if ENV_HEADER not in lines:
+        if not any(header in lines for header in ENV_HEADERS):
             if lines and lines[-1].strip():
                 lines.append("")
             lines.append(ENV_HEADER)
@@ -239,13 +271,13 @@ def upsert_env(path: Path, values: dict[str, str]) -> None:
 
 
 def clear_env(path: Path, keys: tuple[str, ...]) -> None:
-    """Comment out managed keys on teardown so nothing stale points at AWS."""
+    """Remove the managed keys and header so nothing stale points at AWS."""
     if not path.exists():
         return
     patterns = {key: re.compile(rf"^\s*{re.escape(key)}\s*=") for key in keys}
     kept = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip() == ENV_HEADER:
+        if line.strip() in ENV_HEADERS:
             continue
         if any(pattern.match(line) for pattern in patterns.values()):
             continue
@@ -307,7 +339,7 @@ def provision_secret(clients: Clients, config: Config) -> str:
     try:
         response = clients.secrets.create_secret(
             Name=config.secret_name,
-            Description="Demo 06 Neo4j command credential for the reservation Lambda.",
+            Description="Lab 5 Neo4j command credential for the reservation Lambda.",
             SecretString=payload,
             Tags=_tags_list(),
         )
@@ -346,7 +378,7 @@ def _ensure_role(clients: Clients, name: str, trust_policy: str) -> str:
         response = clients.iam.create_role(
             RoleName=name,
             AssumeRolePolicyDocument=trust_policy,
-            Description=f"Demo 06 AgentCore role ({name}).",
+            Description=f"Lab 5 AgentCore role ({name}).",
             Tags=_tags_list(),
         )
         log(f"  created role {name}")
@@ -710,7 +742,7 @@ def provision_lambda(
             MemorySize=LAMBDA_MEMORY_MB,
             Architectures=[LAMBDA_ARCH],
             Environment=environment,
-            Description="Demo 06 reservation-request command behind the Gateway.",
+            Description="Lab 5 reservation-request command behind the Gateway.",
             Tags={TAG_KEY: TAG_VALUE},
         )
         log(f"  created function {config.lambda_function_name}")
@@ -780,7 +812,7 @@ def provision_gateway(clients: Clients, config: Config, gateway_role_arn: str) -
             roleArn=gateway_role_arn,
             protocolType="MCP",
             authorizerType="NONE",
-            description="Demo 06 Gateway exposing the sole reservation target.",
+            description="Lab 5 Gateway exposing the sole reservation target.",
             tags={TAG_KEY: TAG_VALUE},
         )
         gateway_id = created["gatewayId"]
@@ -792,10 +824,14 @@ def provision_gateway(clients: Clients, config: Config, gateway_role_arn: str) -
     return {"id": gateway_id, "url": gateway["gatewayUrl"]}
 
 
-def _load_target_manifest(lambda_arn: str) -> dict[str, object]:
+def _load_target_manifest(lambda_arn: str, target_name: str) -> dict[str, object]:
     raw = GATEWAY_MANIFEST.read_text(encoding="utf-8")
     raw = raw.replace("${RESERVATION_LAMBDA_ARN}", lambda_arn)
-    return json.loads(raw)
+    manifest = json.loads(raw)
+    # The manifest is checked in with the default name. Overriding it here is
+    # what carries DEMO06_PREFIX into the one name the deployed Runtime checks.
+    manifest["name"] = target_name
+    return manifest
 
 
 def _find_target(clients: Clients, gateway_id: str, name: str) -> str | None:
@@ -821,9 +857,11 @@ def _wait_target_deleted(clients: Clients, gateway_id: str, name: str) -> None:
     raise SystemExit(f"Gateway target {name} was not deleted in time")
 
 
-def provision_target(clients: Clients, gateway_id: str, lambda_arn: str) -> None:
+def provision_target(
+    clients: Clients, gateway_id: str, lambda_arn: str, target_name: str
+) -> None:
     """Create or update the single reservation-request Gateway target."""
-    manifest = _load_target_manifest(lambda_arn)
+    manifest = _load_target_manifest(lambda_arn, target_name)
     name = str(manifest["name"])
     kwargs = {
         "name": name,
@@ -870,7 +908,7 @@ def provision_lambda_permission(
 
 def cmd_provision(clients: Clients, config: Config) -> int:
     """Create every resource in dependency order and hand off via .env."""
-    log(f"Provisioning Demo 06 AgentCore infrastructure in {config.region}")
+    log(f"Provisioning the Lab 5 AgentCore infrastructure in {config.region}")
     log("A1: Neo4j command secret")
     secret_arn = provision_secret(clients, config)
 
@@ -893,7 +931,9 @@ def cmd_provision(clients: Clients, config: Config) -> int:
     log("A4: Gateway and target")
     gateway = provision_gateway(clients, config, gateway_role_arn)
     provision_lambda_permission(clients, config, gateway_role_arn)
-    provision_target(clients, str(gateway["id"]), config.lambda_arn)
+    provision_target(
+        clients, str(gateway["id"]), config.lambda_arn, config.gateway_target_name
+    )
 
     log("A5: config handoff to .env")
     upsert_env(
@@ -911,7 +951,7 @@ def cmd_provision(clients: Clients, config: Config) -> int:
 
 def cmd_status(clients: Clients, config: Config) -> int:
     """Report presence of each resource without changing anything."""
-    log(f"Demo 06 AgentCore status in {config.region}")
+    log(f"Lab 5 AgentCore status in {config.region}")
 
     def report(label: str, present: bool, detail: str = "") -> None:
         mark = "present" if present else "absent "
@@ -947,8 +987,8 @@ def cmd_status(clients: Clients, config: Config) -> int:
     else:
         gateway_id = str(gateway["gatewayId"])
         report("gateway", True, f"{config.gateway_name} ({gateway.get('status')})")
-        target_id = _find_target(clients, gateway_id, "demo06-reservation-request")
-        report("target", target_id is not None, "demo06-reservation-request")
+        target_id = _find_target(clients, gateway_id, config.gateway_target_name)
+        report("target", target_id is not None, config.gateway_target_name)
     return 0
 
 
@@ -974,22 +1014,22 @@ def cmd_teardown(clients: Clients, config: Config, assume_yes: bool) -> int:
     """Delete every resource in reverse dependency order."""
     if not assume_yes:
         answer = input(
-            f"Delete all Demo 06 AgentCore resources in {config.region}? [y/N] "
+            f"Delete all Lab 5 AgentCore resources in {config.region}? [y/N] "
         )
         if answer.strip().lower() not in {"y", "yes"}:
             log("Aborted.")
             return 1
 
-    log("Tearing down Demo 06 AgentCore infrastructure")
+    log("Tearing down the Lab 5 AgentCore infrastructure")
     gateway = _find_gateway(clients, config.gateway_name)
     if gateway is not None:
         gateway_id = str(gateway["gatewayId"])
-        target_id = _find_target(clients, gateway_id, "demo06-reservation-request")
+        target_id = _find_target(clients, gateway_id, config.gateway_target_name)
         if target_id is not None:
             clients.agentcore.delete_gateway_target(
                 gatewayIdentifier=gateway_id, targetId=target_id
             )
-            _wait_target_deleted(clients, gateway_id, "demo06-reservation-request")
+            _wait_target_deleted(clients, gateway_id, config.gateway_target_name)
             log("  deleted gateway target")
         clients.agentcore.delete_gateway(gatewayIdentifier=gateway_id)
         log("  deleted gateway")
@@ -1001,6 +1041,15 @@ def cmd_teardown(clients: Clients, config: Config, assume_yes: bool) -> int:
         if _error_code(error) != "ResourceNotFoundException":
             raise
 
+    # Deliberate policy, and deliberately different from the other teardown
+    # half. `05-agentcore-deploy/workshop_cleanup.py` scans the account for
+    # resources it did not name, so it has to prove ownership from the
+    # `WorkshopResource` tag and refuses anything untagged. This script deletes
+    # only the three exact names it constructed above from PREFIX, never a
+    # prefix or wildcard match, so there is nothing to guess about. The
+    # five-roles incident in `05-agentcore-deploy/CLEANUP.md` came from matching
+    # role names by prefix; an exact name built from the same config that
+    # created the role does not have that failure mode.
     for role in (
         config.lambda_role_name,
         config.gateway_role_name,

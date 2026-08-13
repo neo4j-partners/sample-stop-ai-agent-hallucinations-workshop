@@ -14,16 +14,18 @@ Three already-landed fixes are pinned here:
   Before the fix the call ran inline on the event loop and the timeout could
   never cancel it. This test stubs a slow ``invoke`` and asserts the timeout
   raises rather than hanging.
-* **F16**: both Bedrock clients are built with ``BEDROCK_CONFIG`` so each call
-  is bounded (``read_timeout`` x ``total_max_attempts``) well under the
-  per-document ``DOC_TIMEOUT_SECONDS`` budget. This test asserts the config
-  reaches both clients and that the bounding invariant holds.
+* **F16**: both Bedrock clients are built with ``BEDROCK_CONFIG``, so every
+  socket carries a ``read_timeout`` instead of hanging forever. This test
+  asserts the config reaches both clients and pins the two numbers the retry
+  budget is reasoned about with.
 
-Run with::
+Run from inside this directory, which is where the lab's dependencies and its
+``data/`` corpus are resolved from::
 
-    python -m unittest discover -s 01-graph-build -v
+    cd 01-graph-build
+    uv run --with pytest --with-requirements requirements.txt -m pytest
 
-or collect the whole file with ``pytest 01-graph-build/test_bedrock_providers.py``.
+Add ``test_bedrock_providers.py`` to that command to collect this file alone.
 """
 
 from __future__ import annotations
@@ -153,27 +155,38 @@ class TestAinvokeTimeout(unittest.TestCase):
 
 
 class TestBedrockClientConfig(unittest.TestCase):
-    """F16: both clients carry a bounded config, and the bound holds."""
+    """F16: both clients carry the same bounded, rate-limited config."""
 
     def test_both_clients_apply_bedrock_config(self) -> None:
         for provider in (BedrockLLM(), BedrockEmbeddings()):
             config = provider.client.meta.config
             with self.subTest(provider=type(provider).__name__):
                 self.assertEqual(config.read_timeout, 45)
-                # botocore normalises ``max_attempts`` to ``total_max_attempts``
-                # (initial try + retries), so 2 configured retries -> 3 total.
-                self.assertEqual(config.retries["total_max_attempts"], 3)
+                # botocore reads ``max_attempts`` as a retry count and
+                # normalises it to ``total_max_attempts``, the initial try plus
+                # the retries, so 5 configured -> 6 total.
+                self.assertEqual(config.retries["total_max_attempts"], 6)
+                # Adaptive mode is the point of the setting: it adds a
+                # client-side rate limiter, so a room full of simultaneous Lab 1
+                # builds backs off against the shared per-region quota instead
+                # of retrying into it at full speed.
+                self.assertEqual(config.retries["mode"], "adaptive")
 
-    def test_worst_case_call_fits_inside_the_document_budget(self) -> None:
-        """read_timeout x total_max_attempts must stay under DOC_TIMEOUT_SECONDS.
+    def test_worst_case_retry_chain_is_the_documented_270_seconds(self) -> None:
+        """Pin read_timeout x total_max_attempts at the number that was chosen.
 
-        This is the one-line invariant the config comment promises: 45 * 3 =
-        135 < 180. If either number drifts, a single hung call can outlast the
-        per-document ``asyncio.wait_for`` and the timeout stops meaning anything.
+        45 * 6 = 270, which is longer than ``DOC_TIMEOUT_SECONDS``. That is the
+        trade the comment above ``BEDROCK_CONFIG`` records: throttling returns
+        fast and costs backoff rather than a read timeout, so the extra attempts
+        are cheap in the case they exist for, while six consecutive sockets each
+        hanging the full 45s ends with the outer ``asyncio.wait_for`` firing and
+        the build moving on. Raising ``DOC_TIMEOUT_SECONDS`` or lowering
+        ``read_timeout`` are the two levers named there.
 
-        The bound is read off a live client's normalised config, since botocore
-        exposes the raw ``BEDROCK_CONFIG.retries`` as ``{"max_attempts": 2}`` and
-        only resolves it to ``total_max_attempts`` once a client is built.
+        The numbers are read off a live client's normalised config, since
+        botocore exposes the raw ``BEDROCK_CONFIG.retries`` as
+        ``{"max_attempts": 5}`` and only resolves ``total_max_attempts`` once a
+        client is built.
         """
         try:
             from graph_builder import DOC_TIMEOUT_SECONDS
@@ -184,8 +197,10 @@ class TestBedrockClientConfig(unittest.TestCase):
         read_timeout = config.read_timeout
         total_max_attempts = config.retries["total_max_attempts"]
 
-        self.assertEqual(read_timeout * total_max_attempts, 135)
-        self.assertLess(read_timeout * total_max_attempts, DOC_TIMEOUT_SECONDS)
+        self.assertEqual(read_timeout * total_max_attempts, 270)
+        # One attempt still has to fit, or the per-document bound would cut off
+        # a call that was never going to be retried.
+        self.assertLess(read_timeout, DOC_TIMEOUT_SECONDS)
 
 
 if __name__ == "__main__":

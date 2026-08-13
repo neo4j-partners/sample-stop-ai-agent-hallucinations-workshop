@@ -23,16 +23,18 @@ Lab 4 moves it there. The limit comes out of a `Rule` node in your graph, the re
 
 ## The one notebook
 
-`4.1_reservation_write.ipynb` has 21 cells in six sections. It creates no AWS resources.
+`4.1_reservation_write.ipynb` has 29 cells in six sections. It creates no AWS resources.
 
 | Section | What it does |
 |---|---|
 | 1. Connect, and confirm the rule is in the graph | Applies the idempotent graph preparation, reports what is still missing, then reads the `Rule` node and asserts it agrees with the shared constant |
-| 2. Register the write on `hotel_agent` | Rebuilds Lab 3's `hotel_agent` with `create_reservation_request_tool` added and `MaxGuestsHook` removed |
-| 3. A 15-guest request is rejected | Computes the dates and the two request ids, asks the agent to book 15 guests, then calls the command directly twice to read the fields the agent was working from and to show the rejection stored nothing |
-| 4. A valid request is recorded, and safe to retry | Accepts a within-limit request on the booking `request_id`, then re-delivers it identically |
+| 2. Register the write on `hotel_agent` | Rebuilds Lab 3's `hotel_agent` with `create_reservation_request_tool` added and both `MaxGuestsHook` and `book_room` removed, then prints the assembled system prompt and asserts it holds no digit |
+| 3. A 15-guest request is rejected | Computes the dates and the three request ids, runs the retriever once and asserts its top `hotel_id` matches the fixture manifest, asks the agent to book 15 guests, then calls the command directly twice to read the fields the agent was working from and to show the rejection stored nothing |
+| 4. The agent books a stay, and the row is in your graph | The agent takes a within-limit booking that succeeds, the row is read back from the graph, then the booking `request_id` is delivered twice directly to show a retry is safe |
 | 5. A hotel that does not exist is rejected | Sends `hotel_id hotel-does-not-exist` through the agent, then through the command directly |
-| 6. Inspect the reservation in your graph | Matches on `request_id` and asserts exactly one row |
+| 6. Inspect the reservation in your graph | Reads all three ids back: one row for the booking id, one for the agent booking id, and none for the over-limit id |
+
+Every agent turn asserts that `create_reservation_request_tool` actually ran, by comparing Strands' accumulated tool-call count before and after the turn. A model that answers from the prompt without calling the tool produces the same-looking transcript and a very different fact, so the count is what separates them.
 
 Live cells self-skip. Cell 3 sets `NEO4J_READY` from `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`, `BEDROCK_READY` from whether boto3 finds AWS credentials, and `AGENT_READY` from both, so the notebook runs top to bottom with no configuration at all.
 
@@ -54,13 +56,26 @@ assert rule["max_guests"] == MAX_GUESTS
 
 The assertion runs in that direction on purpose. When the constant and the graph disagree, the graph is the one that decides, because the graph is what the command reads. `demo-06-maximum-guests` is a real identifier in seeding and query code, not a leftover label; it is not renamed by the six-lab renumbering.
 
-### The hook comes off the agent
+### The hook comes off the agent, and so does `book_room`
 
-Section 2 rebuilds `hotel_agent` with three changes from Lab 3. `create_reservation_request_tool` joins the toolset, `MaxGuestsHook` is gone, and the system prompt gains one instruction about passing the caller's identifiers through.
+Section 2 rebuilds `hotel_agent` with four changes from Lab 3. `create_reservation_request_tool` joins the toolset, `MaxGuestsHook` is gone, the system prompt gains one instruction about passing the caller's identifiers through, and `book_room` is gone.
 
 Removing the hook is the point rather than a simplification. The rule it enforced now lives in the graph, and `workshop.reservation_command` reads it inside the write transaction, so the limit holds for every caller of the command: this notebook calling it directly, the agent calling it as a tool, and the Lambda Lab 5 puts behind AgentCore Gateway. A hook protects one agent. A rule in the graph, checked at the write boundary, protects the data.
 
+Removing `book_room` is the other half of that. Lab 3's version returned `f"SUCCESS: Booked {hotel} for {guests} guests"` whatever it was handed, which is what made the hook demonstrable there: it needed a tool that did nothing so it had something to cancel. Lab 4 replaces the simulated success with a write, so a `SUCCESS` the graph never agreed to is no longer a thing the agent can produce.
+
 The system prompt still carries `GROUNDING_INSTRUCTIONS` from `workshop.hybrid_retrieval`, the same abstention text Lab 2 used, plus one instruction to pass the caller's `request_id`, `hotel_id`, and dates through exactly as written and never to claim a booking succeeded unless the response says `accepted`.
+
+### The prompt is printed, not described
+
+The claim that the limit is nowhere in the prompt is the claim the whole lab rests on, and `GROUNDING_INSTRUCTIONS` arrives by import, which is where a stray number would hide. So section 2 prints `hotel_agent.system_prompt` in full and asserts that no digit appears anywhere in it:
+
+```python
+digits = sorted({c for c in hotel_agent.system_prompt if c.isdigit()})
+assert not digits
+```
+
+There is no `10`, no `15`, and no threshold of any kind for the model to be argued out of. The rejection in section 3 therefore cannot have come from the prompt.
 
 ---
 
@@ -72,7 +87,9 @@ The command accepts exactly five fields and nothing else:
 request_id, hotel_id, check_in, check_out, guests
 ```
 
-There is no actor field, no guest identity, no room selection, no payment field, and no booking-lifecycle operation. `reservation_input_schema()` in `workshop.contracts` is closed with `additionalProperties: False`, and dates are `YYYY-MM-DD`. There is exactly one write path in the workshop, and widening it is deliberately out of scope: an extra parameter, a second write, or a caller-selectable retriever all go against the frozen contract in [`CONTRACTS.md`](CONTRACTS.md). Flag it before adding one.
+There is no actor field, no guest identity, no room selection, no payment field, and no booking-lifecycle operation. Dates are `YYYY-MM-DD`. There is exactly one write path in the workshop, and widening it is deliberately out of scope: an extra parameter, a second write, or a caller-selectable retriever all go against the frozen contract in [`CONTRACTS.md`](CONTRACTS.md). Flag it before adding one.
+
+Two different things enforce that shape, and it is worth keeping them apart. `reservation_input_schema()` in `workshop.contracts` is the published description, closed with `additionalProperties: False`, and it is what the committed Gateway and Lambda tool schemas are checked against by `test_contracts.py`. Nothing in Lab 4's runtime path validates against it. What actually bounds a call here is `_validate_command` in `workshop.reservation_command`, which rejects a payload whose key set is not exactly the five fields, requires a canonical UUID `request_id`, a non-empty `hotel_id`, a positive integer `guests`, and two dates that round-trip through `date.fromisoformat` with `check_out` after `check_in`. It runs before a session is opened, so an invalid command never reaches the graph. The schema and the validator agree by review, not by construction, which is why both are tested.
 
 Every response is a structured document rather than prose, so the agent reports an outcome instead of composing an apology:
 
@@ -90,21 +107,35 @@ Every response is a structured document rather than prose, so the agent reports 
 
 ### The four cases the notebook runs
 
-1. **`max_guests_exceeded`.** The agent is asked to book `OVER_LIMIT_GUESTS`, which is `15`, into the hero hotel. Nothing in the prompt mentions a limit of 10, so the model could not have been argued out of one. The command reads the rule, rejects, and writes nothing. Section 3 then calls the command directly and asserts `status == "rejected"` and `reason_code == "max_guests_exceeded"`. It delivers the same payload once more and asserts `duplicate` is still false, which is what proves the rejection stored nothing: a duplicate can only be reported against a stored request.
-2. **Accepted.** The booking `request_id` with `guests=MAX_GUESTS` creates one `ReservationRequest` linked to the hero hotel by `FOR_HOTEL`. The cell asserts `status == "accepted"` and `duplicate` is false.
+1. **`max_guests_exceeded`.** The agent is asked to book `OVER_LIMIT_GUESTS`, which is `15`, into the hero hotel. The printed system prompt contains no digit at all, so the model could not have been argued out of a limit it was never given. The command reads the rule, rejects, and writes nothing. Section 3 then calls the command directly and asserts `status == "rejected"` and `reason_code == "max_guests_exceeded"`. It delivers the same payload once more and asserts `duplicate` is still false, which is what proves the rejection stored nothing: a duplicate can only be reported against a stored request. Section 6 then reads that `request_id` back and asserts zero rows.
+2. **Accepted.** Twice, and for two different reasons. Section 4 opens with the agent booking four guests on the agent booking `request_id`, and the next cell reads the row back out of the graph and asserts one accepted row carrying that guest count and the hero `hotel_id`. The lab needs one turn where the agent is trusted with the action rather than blocked, because a guardrail is only interesting when the thing it guards is allowed to happen. Section 4 then calls the command directly with `guests=MAX_GUESTS` on the booking `request_id` and asserts `status == "accepted"` with `duplicate` false.
 3. **Duplicate delivery.** The identical payload delivered a second time returns the stored record with `duplicate=true` and its original `created_at`, and creates no second node. The cell asserts `replay["duplicate"] is True`, and it also serializes `status`, `request_id`, `hotel_id`, and `created_at` from both responses and asserts the two strings are equal, so the claim that one record came back twice is shown rather than stated.
 4. **`unknown_hotel`.** `hotel_id hotel-does-not-exist` matches no prepared fixture `Hotel`, so the command rejects rather than creating an orphan request. This is why grounded retrieval returns an opaque `hotel_id` and not a display name: a name a model half-remembers fails this check, and a name it invents outright fails it too.
 
+### The `hotel_id` comes from retrieval, shown rather than asserted
+
+`hero_id` is read from the committed fixture manifest, which is convenient and proves nothing by itself. So section 3 runs the Lab 2 retriever once, on the same hero question Lab 2 asks, and asserts the top result's `hotel_id` equals `hero_id`:
+
+```python
+evidence = search_hotel_knowledge(f"What amenities and guest rating does {HERO_NAME} have?")
+assert evidence[0]["hotel_id"] == hero_id
+```
+
+That is what grounded means here: the id the write path accepts is the id retrieval returns from evidence in the graph, and the two are checked against each other rather than assumed equal. The check needs Bedrock as well as Neo4j, because the query is embedded, so it skips with the other agent cells.
+
 ### The notebook creates the `request_id`, not the model
 
-Section 3 generates two of them and prints both:
+Section 3 generates three of them and prints all three:
 
 ```python
 OVER_LIMIT_REQUEST_ID = str(uuid.uuid4())
+AGENT_BOOKING_REQUEST_ID = str(uuid.uuid4())
 BOOKING_REQUEST_ID = str(uuid.uuid4())
 ```
 
-One id per case, because the two cases make different points. The over-limit id shows that a rejected request leaves nothing behind. The booking id shows that the same id delivered twice produces one node.
+One id per case, because the three cases make different points. The over-limit id shows that a rejected request leaves nothing behind. The agent booking id shows the agent taking a real action that lands in the graph on the id it was handed. The booking id shows that the same id delivered twice produces one node.
+
+The direct-call cell in section 4 asserts that its first delivery is a first delivery, so re-running that one cell alone fails on `accepted["duplicate"]`, which is correct rather than a bug. Re-run the section 3 cell that mints the three ids first, then the section 4 cell.
 
 Idempotence cannot be demonstrated any other way. A model that invents a fresh UUID on the retry produces two distinct requests and two nodes, and the second delivery is a new write rather than a replay. The caller owns the key, reuses it on every retry, and the agent is told to pass it through verbatim. `_validate_command` rejects anything that is not a canonical UUID before a session is opened.
 
@@ -144,6 +175,26 @@ Three uniqueness constraints make it safe, created idempotently by `apply_lab4_f
 
 No Cypher in this lab is generated by a model. Every query is a named, parameterized constant in `workshop/src/workshop/reservation_command.py` or `workshop/src/workshop/graph_setup.py`, and no part of a request is interpolated into a query string.
 
+### Clearing the requests between runs
+
+Every run of the notebook mints fresh `request_id` values, so the `ReservationRequest` nodes accumulate: two per full run, three if you count the agent's. Nothing breaks, because every assertion in the notebook is anchored on one `request_id` rather than on a total, and Lab 5 and Lab 6 read none of them. They are just clutter in the graph browser.
+
+Delete them when you want a clean graph. The match is scoped to the workshop owner, so it cannot touch canonical hotel data:
+
+```cypher
+MATCH (r:ReservationRequest {workshop_owner: 'neo4j-ftw-demo-6'})
+DETACH DELETE r
+```
+
+Count them first if you would rather look before deleting:
+
+```cypher
+MATCH (r:ReservationRequest {workshop_owner: 'neo4j-ftw-demo-6'})
+RETURN count(r) AS requests, collect(DISTINCT r.status) AS statuses
+```
+
+The `Rule` node and the three constraints carry the same owner but different labels, so neither statement above reaches them. Re-running the notebook after a delete works exactly as a first run does.
+
 ---
 
 ## Quick Start
@@ -163,7 +214,7 @@ cd 04-grounded-write
 uv venv && uv pip install -r requirements.txt
 ```
 
-`requirements.txt` installs the shared package with `-e ../workshop`, which brings neo4j, boto3, neo4j-graphrag, and python-dotenv, plus `strands-agents` and `bedrock-agentcore-starter-toolkit`.
+`requirements.txt` installs the shared package with `-e ../workshop`, which brings neo4j, boto3, neo4j-graphrag, and python-dotenv, plus `strands-agents`. Nothing else. Lab 4 creates no AWS resources, so it does not install `bedrock-agentcore-starter-toolkit`; that dependency belongs to Lab 5, and carrying it here added 31 packages this lab never imports.
 
 ### Step 2: Confirm the command and the rule constant import
 
@@ -203,11 +254,13 @@ uv run --with pytest --with-requirements requirements.txt -m pytest
 | `test_graph_setup.py` | 12 | Constraint shape rather than only constraint name, fixture resolution by source filename, manifest determinism, and that the reservation graph shape carries no actor |
 | `test_hybrid_retrieval.py` | 12 | The frozen retrieval contract this lab writes against: fixed indexes, static traversal, frozen ranker and `top_k`, bounded null-safe results |
 | `test_contracts.py` | 7 | The closed schemas, the Gateway projection, the reason-code set, and that the reservation contract has no actor or booking lifecycle |
-| `test_demo_guest_consistency.py` | 3 | That the guest limit has one source of truth |
+| `test_guest_limit_consistency.py` | 3 | That the guest limit has one source of truth |
 
 `test_reservation_command.py` and `test_contracts.py` account for 29 of the 56, which is the reservation command and its contracts.
 
-Every test but one runs without a live graph. `SeededRuleTests::test_seeded_rule_matches_the_contract` in `test_demo_guest_consistency.py` needs a live graph: it reads the `Rule` node with `RULE_QUERY` and asserts the node exists exactly once, carries `max_guests == MAX_GUESTS`, and is enabled. Its `setUp` calls `load_dotenv()` and skips with `Neo4j is not configured` when `NEO4J_URI`, `NEO4J_USERNAME`, or `NEO4J_PASSWORD` is absent, which is how the offline suite stays green. The other two tests in that file read `graph_setup.py` as source, using `ast` to prove the seeding call binds `max_guests` to `contracts.MAX_GUESTS` rather than to a literal `10`, because a literal and a constant reference evaluate identically at runtime and only the source drifts.
+The 12 in `test_hybrid_retrieval.py` cover Lab 2's retriever, not anything Lab 4 implements. They live here because Lab 4 is where that retriever's output crosses into a write: a `hotel_id` the retriever returns is a `hotel_id` the reservation command will accept, and this is the folder where a change to the retrieval contract breaks something. Lab 2 ships no test files, so these are the only tests that pin it either way. Counting them as coverage of the write path would overstate what the 56 prove.
+
+Every test but one runs without a live graph. `SeededRuleTests::test_seeded_rule_matches_the_contract` in `test_guest_limit_consistency.py` needs a live graph: it reads the `Rule` node with `RULE_QUERY` and asserts the node exists exactly once, carries `max_guests == MAX_GUESTS`, and is enabled. Its `setUp` calls `load_dotenv()` and skips with `Neo4j is not configured` when `NEO4J_URI`, `NEO4J_USERNAME`, or `NEO4J_PASSWORD` is absent, which is how the offline suite stays green. The other two tests in that file read `graph_setup.py` as source, using `ast` to prove the seeding call binds `max_guests` to `contracts.MAX_GUESTS` rather than to a literal `10`, because a literal and a constant reference evaluate identically at runtime and only the source drifts.
 
 That live test is also the one that reports a graph problem rather than a code problem. Run against a graph whose build had not yet reached the rule-seeding step, it fails with `AssertionError: 0 != 1 : Expected exactly one demo-06-maximum-guests rule node`, and the other 55 tests pass. Read a failure there as "re-run Lab 1", or as "the build is still running", before reading it as a regression.
 
@@ -241,7 +294,7 @@ A `rule_count` of `0` means the rule is missing. A `rule_count` of `1` with `ena
 
 **An unknown-hotel rejection on a hotel you can see in the graph.** `reason_code=unknown_hotel` means the `hotel_id` matched no `Hotel` node carrying `demo6_fixture = true`. Only hotels in the committed fixture manifest have a stable `hotel_id`, and grounded retrieval returns `hotel_id: null` for every other hotel, precisely so those hotels cannot be sent to the write path. Take the ID from `manifest.hotels[HERO_SOURCE]` as section 3 does, or from a retrieval result's `hotel_id` field, and never from a hotel name. If the fixture hotels themselves are unresolved, section 1 names that as a readiness problem and the fix is to re-run Lab 1.
 
-**Bedrock access denied, or `AccessDeniedException` on the first agent call.** Enable the model in your region through the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), and confirm `AWS_REGION` in the repo-root `.env` matches that region. The notebook reads `MODEL_ID` from the environment and defaults to `us.anthropic.claude-sonnet-5`, so override that variable to use a different model. The three agent cells are gated on `AGENT_READY`; the direct-command cells need only Neo4j, so a Bedrock problem leaves the four command outcomes still demonstrable.
+**Bedrock access denied, or `AccessDeniedException` on the first agent call.** Enable the model in your region through the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), and confirm `AWS_REGION` in the repo-root `.env` matches that region. The notebook reads `MODEL_ID` from the environment and defaults to `us.anthropic.claude-sonnet-5`, so override that variable to use a different model. Every cell that needs a model is gated on `AGENT_READY`: the three agent turns, the system-prompt check, the retrieval check, and the graph read of the agent's booking. The direct-command cells need only Neo4j, so a Bedrock problem leaves the four command outcomes still demonstrable.
 
 **Cells print `Skipping: needs both Neo4j and AWS credentials.`** That is `AGENT_READY` reporting absent configuration, not an empty graph. Check `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` in the repo-root `.env`, and note that the hosted Workshop Studio environment writes `NEO4J_USER` while every lab here reads `NEO4J_USERNAME`.
 
@@ -251,17 +304,19 @@ A `rule_count` of `0` means the rule is missing. A `rule_count` of `1` with `ena
 
 ```
 04-grounded-write/
-├── 4.1_reservation_write.ipynb   # The one notebook, 21 cells
-├── 01_hybrid_retrieval.ipynb     # Retired authoring source, not in the runner registry
+├── 4.1_reservation_write.ipynb   # The one notebook, 29 cells
+├── 01_hybrid_retrieval.ipynb     # Retired authoring source, bannered as such, not in the runner registry
 ├── CONTRACTS.md                  # The frozen retrieval and command contracts
-├── requirements.txt              # -e ../workshop, strands-agents, starter toolkit
+├── requirements.txt              # -e ../workshop and strands-agents
 ├── conftest.py                   # Records the pytest collection boundary, sets no options
 ├── test_reservation_command.py   # 22 tests
 ├── test_graph_setup.py           # 12 tests
-├── test_hybrid_retrieval.py      # 12 tests
+├── test_hybrid_retrieval.py      # 12 tests, covering Lab 2's retriever
 ├── test_contracts.py             # 7 tests
-└── test_demo_guest_consistency.py  # 3 tests, one of them live
+└── test_guest_limit_consistency.py  # 3 tests, one of them live
 ```
+
+`01_hybrid_retrieval.ipynb` sorts first in this folder and opens on a first cell marking it retired and pointing at `4.1_reservation_write.ipynb`. It is kept for reference and is not maintained; its write cells duplicate an older version of Lab 4's.
 
 The implementation is not here. It lives in the shared package, because Lab 5 deploys the same code: [`workshop/src/workshop/reservation_command.py`](../workshop/src/workshop/reservation_command.py), [`contracts.py`](../workshop/src/workshop/contracts.py), and [`graph_setup.py`](../workshop/src/workshop/graph_setup.py). [`CONTRACTS.md`](CONTRACTS.md) states the frozen shapes in prose; `contracts.py` is the authority when the two disagree.
 

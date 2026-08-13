@@ -4,4 +4,6 @@
 
 # 2.2 closes by handing the one retrieval tool to a small agent, which is the
 # first time in the workshop a model is asked to decline rather than guess.
-strands-agents>=1.27.0
+# The ceiling is deliberate: the 1.x line has already renamed a hook API, so a
+# 2.0 is assumed to break the agent cells until someone runs them against it.
+strands-agents>=1.27.0,<2.0.0

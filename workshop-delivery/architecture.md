@@ -41,7 +41,7 @@ billable infrastructure. Lab 6 is optional.
  |                                                                                      |
  |    hotel-faqs.zip  ---> SimpleKGPipeline ---> Neo4j Aura                             |
  |      300 .txt docs         |                                                         |
- |      lite build takes 30   +--> Bedrock reasoning: entity extraction                 |
+ |      lite build: 30 docs   +--> Bedrock reasoning: entity extraction                 |
  |                            +--> Bedrock embeddings: chunk vectors                    |
  |                            schema=GRAPH_SCHEMA, from_pdf=False,                      |
  |                            perform_entity_resolution=True,                           |
@@ -106,8 +106,8 @@ billable infrastructure. Lab 6 is optional.
  +--------------------------------------------------------------------------------------+
  |  LAB 3  03-agents-and-tools/ 3.1_strands_primer.ipynb                                |
  |                                                                                      |
- |    Five teaching sections: agents, model providers, @tool, token metrics,            |
- |    lifecycle hooks, and a Swarm. Then a sixth that assembles one agent:              |
+ |    Four teaching sections: agents, model providers, @tool, and lifecycle             |
+ |    hooks. Then a fifth that assembles one agent:                                     |
  |                                                                                      |
  |      hotel_agent = Agent(                                                            |
  |          name="hotel_agent",                                                         |
@@ -470,15 +470,22 @@ carried its own copy of the code more than one demo needed.
 
 | Module | Labs that import it |
 |---|---|
-| `retrieval_contract.py` | 1, 2, 4, 5 |
-| `bedrock_providers.py` | 1, 2 |
+| `retrieval_contract.py` | 0, 1, 2 |
+| `bedrock_providers.py` | 0, 1, 2, 3, 4, 5 |
 | `retrieval_setup.py` | 1, 2 |
-| `graph_connection.py` | 1, 2, 4, 5 |
+| `graph_connection.py` | 1, 2 |
 | `graph_schema.py` | 1, 2 |
-| `contracts.py` | 2, 4, 5 |
-| `graph_setup.py` | 1, 4 |
+| `contracts.py` | 0, 1, 2, 4, 5 |
+| `graph_setup.py` | 1, 2, 4, 5, 6 |
 | `hybrid_retrieval.py` | 2, 3, 4, 5 |
 | `reservation_command.py` | 4, 5 |
+
+Direct imports by name, counted across every shipped notebook and Python file
+in each lab folder. Labs 4 and 5 reach the five embedding and index constants
+through `contracts.py`, which re-exports them, so they never name
+`retrieval_contract.py` themselves. Lab 0's `verify_setup.py` installs the
+package the same way a lab does, which is how it checks Bedrock access against
+the exact model ids the labs will use.
 
 Each lab keeps its own `requirements.txt` and its own `.venv`, and each one
 installs the package in editable mode with `-e ../workshop`. Three consumers
@@ -497,9 +504,9 @@ outside the labs install it differently, and the difference matters:
 - The Runtime image installs the wheel described in View 2.
 
 `workshop/__init__.py` deliberately re-exports nothing. `graph_connection` raises
-at import when `NEO4J_PASSWORD` is unset, and `bedrock_providers`, `graph_setup`,
-`hybrid_retrieval`, and `reservation_command` all build AWS or Neo4j clients. A
-convenience re-export would drag every one of those into a bare
+at import when `NEO4J_URI` or `NEO4J_PASSWORD` is unset, and `bedrock_providers`,
+`graph_setup`, `hybrid_retrieval`, and `reservation_command` all build AWS or
+Neo4j clients. A convenience re-export would drag every one of those into a bare
 `import workshop`, and `contracts` promises the Lambda that it can be imported
 without touching credentials or the network.
 
@@ -515,11 +522,12 @@ without touching credentials or the network.
  * Aura credentials stay in the participant's own environment, read from
    NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, and NEO4J_DATABASE in the
    repo-root .env. They are never placed in a prompt or a tool input.
- * workshop.graph_connection raises at import when NEO4J_PASSWORD is unset.
-   There is no default password, so a missing credential fails loudly instead
-   of sending a bad one. Notebooks import connecting modules inside a guarded
-   branch for exactly that reason, which is also what lets every live cell
-   self-skip offline.
+ * workshop.graph_connection raises at import when NEO4J_URI or
+   NEO4J_PASSWORD is unset. Neither has a default, so a missing credential
+   fails loudly instead of sending a bad one, or a good one to a localhost
+   that is not listening. Notebooks import connecting modules inside a
+   guarded branch for exactly that reason, which is also what lets every
+   live cell self-skip offline.
  * Lab 5 moves that same boundary into AWS. The Runtime gets Neo4j from
    container environment variables and no Secrets Manager access. The
    reservation Lambda gets the write credential from one secret the Runtime

@@ -1,5 +1,4 @@
 # The shared package brings boto3, neo4j, neo4j-graphrag, and python-dotenv.
 -e ../workshop
 
-bedrock-agentcore-starter-toolkit
-strands-agents>=1.27.0
+strands-agents>=1.27.0,<2.0.0

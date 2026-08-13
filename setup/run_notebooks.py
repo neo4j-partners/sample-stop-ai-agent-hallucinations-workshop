@@ -120,15 +120,20 @@ NOTEBOOKS = (
         REPO_ROOT / "05-agentcore-deploy" / "5.1_agentcore_deploy.ipynb",
         deploys_resources=True,
     ),
-    Notebook(
-        "5",
-        REPO_ROOT / "05-agentcore-deploy" / "5.2_teardown.ipynb",
-        deletes_resources=True,
-    ),
+    # 5.3 is registered ahead of 5.2 on purpose. Registry order is run order,
+    # and 5.2 deletes the Runtime that 5.3 invokes, so the documented
+    # `--include-deploy --include-cleanup` pair would otherwise tear the
+    # Runtime down and then walk through a deleted ARN. Anything that deletes
+    # resources belongs last within its lab.
     Notebook(
         "5",
         REPO_ROOT / "05-agentcore-deploy" / "5.3_agentcore_walkthrough.ipynb",
         deploys_resources=True,
+    ),
+    Notebook(
+        "5",
+        REPO_ROOT / "05-agentcore-deploy" / "5.2_teardown.ipynb",
+        deletes_resources=True,
     ),
     Notebook(
         "6",

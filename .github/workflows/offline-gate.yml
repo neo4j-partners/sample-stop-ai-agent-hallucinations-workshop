@@ -1,0 +1,127 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# The offline gate. It proves two things on every push.
+#
+# 1. The whole notebook registry runs green with no Neo4j and no AWS credentials
+#    anywhere in the environment, which is what a participant sees before they
+#    have filled in their .env.
+# 2. Each lab's test suite still holds the count the READMEs quote. The counts
+#    are asserted here so a suite that silently stops collecting, or one that
+#    grows without the docs following, fails the build instead of drifting.
+#
+# This workflow reads no secrets and provisions no AWS resources. Nothing here
+# may ever call setup/provision_agentcore.py, and nothing may pass
+# --include-deploy or --include-cleanup to the notebook runner: those three
+# Lab 5 notebooks touch real, billable resources and are meant to stay skipped.
+
+name: Offline gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  notebooks:
+    name: Notebook registry, no credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Fail loudly rather than quietly running a live build if a credential
+      # ever reaches this runner through a repository or organisation variable.
+      - name: Assert the environment carries no credentials
+        run: |
+          leaked=$(env | grep -E '^(AWS_|NEO4J_)' | cut -d= -f1 || true)
+          if [ -n "$leaked" ]; then
+            echo "Credential-shaped variables present: $leaked"
+            exit 1
+          fi
+          echo "No AWS_* or NEO4J_* variables in the environment."
+
+      - name: Run every notebook in the registry
+        run: uv run setup/run_notebooks.py | tee runner.log
+
+      # The runner already exits nonzero on a cell error. This pins the shape of
+      # a clean offline run as well: ten notebooks, the three Lab 5 ones skipped
+      # behind their flags, and every other cell reached without credentials.
+      - name: Assert the offline run shape
+        run: |
+          expected="Passed: 7  Failed: 0  Skipped: 3  Total: 10"
+          if ! grep -qF "$expected" runner.log; then
+            echo "Expected summary line not found: $expected"
+            echo "--- actual summary ---"
+            grep -E '^Passed:' runner.log || tail -20 runner.log
+            exit 1
+          fi
+
+  tests:
+    name: ${{ matrix.lab }} (${{ matrix.expected }} tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lab: 01-graph-build
+            expected: 12
+          - lab: 04-grounded-write
+            expected: 56
+          # Lab 5's total is 20 in test_workshop_cleanup.py plus 9 in
+          # deployment-tools/test_runtime_integration.py. A bare pytest collects
+          # both, and a stale import in the second file has silently dropped
+          # those 9 before, which is exactly what this count catches.
+          - lab: 05-agentcore-deploy
+            expected: 29
+          - lab: 06-memory
+            expected: 27
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Assert the environment carries no credentials
+        run: |
+          leaked=$(env | grep -E '^(AWS_|NEO4J_)' | cut -d= -f1 || true)
+          if [ -n "$leaked" ]; then
+            echo "Credential-shaped variables present: $leaked"
+            exit 1
+          fi
+
+      # Collection runs first because a count that changed is a different
+      # failure from a test that broke, and the two are worth telling apart.
+      - name: Assert the collected test count
+        working-directory: ${{ matrix.lab }}
+        run: |
+          uv run --with pytest --with-requirements requirements.txt \
+            -m pytest --collect-only -q | tee collected.log
+          actual=$(grep -oE '^[0-9]+ tests? collected' collected.log | head -1 | cut -d' ' -f1)
+          if [ "$actual" != "${{ matrix.expected }}" ]; then
+            echo "${{ matrix.lab }} collects $actual tests, expected ${{ matrix.expected }}."
+            echo "Update the counts in README.md, CLAUDE.md, and this workflow together."
+            exit 1
+          fi
+          echo "${{ matrix.lab }} collects $actual tests."
+
+      # Live tests self-skip without credentials, so this run is green offline.
+      - name: Run the suite
+        working-directory: ${{ matrix.lab }}
+        run: |
+          uv run --with pytest --with-requirements requirements.txt -m pytest -q

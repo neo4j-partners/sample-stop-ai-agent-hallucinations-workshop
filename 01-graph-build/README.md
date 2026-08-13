@@ -25,20 +25,22 @@ There is no ETL step, no staging table, and no separate loader to maintain. The 
 |---|---|
 | [`1.1_build_graph.ipynb`](1.1_build_graph.ipynb) | Pins the schema, selects the corpus, canaries the extraction, builds the graph, verifies both indexes against the embedding contract, and seeds the Labs 4 and 5 fixtures |
 
-Nine code cells, run top to bottom, in eight numbered steps:
+Ten code cells, run top to bottom, in ten numbered steps:
 
 | Step | Cell does | Why it is there |
 |:-:|---|---|
+| 0 | Extracts `hotel-faqs.zip` into `data/` when no documents are there yet, and skips when they are | `data/` is gitignored, so a fresh clone has the zip and nothing else. `prepare_graph.py` extracts it the same way |
 | 1 | Reads `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and the AWS credential chain, and sets `BUILD_READY`, `MODE`, and `REBUILD` | Every module that opens a driver imports `workshop.graph_connection`, which raises at import when `NEO4J_PASSWORD` is unset. So the check reads the environment directly and the connecting cells import their modules later, inside the guard |
-| 2 | Renders `GRAPH_SCHEMA` and prints the three `additional_*` flags | The flags are what turn the schema from a suggestion into a rule |
+| 2 | Renders `GRAPH_SCHEMA`, prints the three `additional_*` flags, and lists the eleven labels in `OFF_SCHEMA_LABELS` | The flags are what turn the schema from a suggestion into a rule, and the label list is what the pin refuses. Step 6 reads the built graph back to show none of it landed |
 | 3 | `selected_paths(MODE)`, then asserts `missing_source_fixtures(paths)` is empty | Five source documents are load-bearing for later labs. Losing one produces a graph whose questions quietly return nothing |
 | 4 | `ensure_retrieval_indexes`, then `report_readiness`, setting `NEEDS_BUILD` and `INDEX_ERROR` | The check that makes the notebook re-runnable. An empty problem list means Lab 2 can already run and there is nothing to rebuild. An index that exists at the wrong dimension sets `INDEX_ERROR` and stops the build before it starts |
 | 5 | `await run_build(paths, title)` and asserts the exit code is `0`, or prints `report(driver)` when the graph is already ready | The extraction itself: clear, canary, verify, clear, ingest, count, report. The acceptance queries print either way |
-| 6 | `verify_retrieval_indexes`, then asserts `fixture_problems(driver)` is empty | A vector index at the wrong dimension does not raise, it returns the wrong neighbours. The check is against the contract, not against existence |
+| 6 | `verify_retrieval_indexes`, asserts `fixture_problems(driver)` is empty, then counts the off-schema labels in the graph | A vector index at the wrong dimension does not raise, it returns the wrong neighbours. The check is against the contract, not against existence. The label count is the evidence that the pin held |
 | 7 | `apply_lab4_fixtures`, asserts `readiness_problems` is empty, then reads the constraints, the stamped IDs, and the rule back out of the graph | Seeds the graph-owned data Labs 4 and 5 depend on, and prints what the graph actually holds rather than what the cell intended to write |
-| 8 | Summarises what was built, then closes the driver | The counts in the readiness report above it are the evidence, not the table |
+| 8 | Prints two copy-pasteable Cypher queries for the Aura console and counts what the first one will draw | The product of this lab is a graph, so the lab ends with the participant looking at one instead of at counts |
+| 9 | Summarises what was built, then closes the driver | The counts in the readiness report above it are the evidence, not the table |
 
-The build is also a command-line script. The notebook is a wrapper around the same `prepare_graph.py` and `graph_builder.py` code, so either path produces the same graph.
+The build is also a command-line script. The notebook is a wrapper around the same `prepare_graph.py` and `graph_builder.py` code, and the script seeds the Labs 4 and 5 fixtures at the end of a successful build the way step 7 does, so either path produces the same graph.
 
 ---
 
@@ -91,7 +93,8 @@ Property names are snake_case throughout, and location lives on `Hotel.address` 
 `run_build` in [`graph_builder.py`](graph_builder.py) does not start the full ingest. The order is deliberate:
 
 ```
-clear -> canary (CANARY_DOCS = 3) -> check the result -> clear -> ingest all -> count -> report
+clear -> canary (CANARY_DOCS = 3) -> check the result -> clear -> ingest all
+      -> retry the failures -> count -> report
 ```
 
 `CANARY_DOCS` is 3, not 1. LLM extraction is stochastic, so a single-document gate intermittently fails a healthy pipeline, and a participant who hits that concludes the lab is broken.
@@ -104,13 +107,13 @@ clear -> canary (CANARY_DOCS = 3) -> check the result -> clear -> ingest all -> 
 - no `:Hotel` at all is a failure.
 - at least one canary hotel must have `name`, `address`, `guest_rating`, and one contracted relationship. The gate is "at least one", not "every one", because a model can miss a field on any single document without the pipeline being broken.
 
-Either failure path calls `clear_demo_graph` and returns a non-zero exit code, so the graph is left empty rather than half-populated. A graph that is wrong in that way looks plausible right up until Lab 2 asks it a question.
+Either failure path calls `clear_lab_graph` and returns a non-zero exit code, so the graph is left empty rather than half-populated. A graph that is wrong in that way looks plausible right up until Lab 2 asks it a question.
 
 The canary's own documents are then cleared before the full ingest, so entity resolution has nothing left over to merge into and the counts at the end are exactly what the full run produced.
 
 ## Run it once, alone, and let it finish
 
-`clear_demo_graph` deletes every node carrying the `__KGBuilder__` label, which is what `neo4j-graphrag` writes, so the wipe is scoped to this lab's own output instead of `MATCH (n) DETACH DELETE n`. Because the build clears before it starts, re-running is safe.
+`clear_lab_graph` deletes every node carrying the `__KGBuilder__` label, which is what `neo4j-graphrag` writes, so the wipe is scoped to this lab's own output instead of `MATCH (n) DETACH DELETE n`. Because the build clears before it starts, re-running is safe.
 
 **Two overlapping builds corrupt each other.** Each one's clear step deletes the other's work in flight, and what survives is a graph with a plausible shape and the wrong contents. This is a real failure from development, not a theoretical one. Start one build, on one machine, and let it finish before starting another.
 
@@ -132,7 +135,9 @@ left behind.
 
 `report_readiness` reports the same mismatch as `document count is N, expected M`. That assertion firing is the safety net doing its job. The fix is one clean re-run, alone.
 
-Individual ingest errors are handled separately and are less serious. `ingest` catches a timeout or an exception per document so one bad document cannot stop the build, and `DOC_TIMEOUT_SECONDS` is 180, set above the worst case of the Bedrock retry chain. If acknowledgements were lost but every source still has a committed `Document` and `Chunk`, the build prints a warning and continues to fixture validation.
+Individual ingest errors are handled separately and are less serious. `ingest` catches a timeout or an exception per document so one bad document cannot stop the build, and `DOC_TIMEOUT_SECONDS` is 180, which bounds the document rather than the Bedrock retry chain inside it. It returns the documents that failed rather than a count, and `retry_failures` runs them again before the count assertion fires. Most extraction failures are a throttle or a transient timeout, and without the retry one lost document out of thirty costs a full rebuild.
+
+The retry clears the failed document first, through `clear_document`. Every node the pipeline writes is a `CREATE`, and a run that failed inside extraction can still have committed its `Document` and `Chunk`, so a plain second attempt would leave two of each for that file and the count assertion would fire on a graph that is otherwise complete. Entities are deleted only when every chunk they came from belongs to that one document, because entity resolution merges a hotel two documents both mention into a single node. If acknowledgements were lost but every source still has a committed `Document` and `Chunk`, the build prints a warning and continues to fixture validation.
 
 ## The corpus selection is stratified, not alphabetical
 
@@ -200,7 +205,7 @@ cd 01-graph-build
 uv venv && uv pip install -r requirements.txt
 ```
 
-`requirements.txt` is two lines: `-e ../workshop` brings the shared package along with `boto3`, `neo4j`, `neo4j-graphrag`, and `python-dotenv`, plus `numpy`.
+`requirements.txt` holds one dependency, `-e ../workshop`, which brings the shared package along with `boto3`, `neo4j`, `neo4j-graphrag`, and `python-dotenv`.
 
 ### Extract the corpus
 
@@ -211,7 +216,7 @@ unzip -q -o hotel-faqs.zip -d data/
 
 That writes 300 `hotel-<city>-<nnn>.txt` files into `data/`, which is where both the notebook and the scripts look. Skip this at an AWS event; the files are already there.
 
-Both first-class paths already do this for you: the notebook's first cell and `prepare_graph.py` each extract the zip when `data/` holds no documents, and skip when it does. Run the command above by hand only before `build_graph.py` or `build_graph_lite.py`, which build unconditionally and extract nothing.
+Both paths already do this for you: the notebook's step 0 and `prepare_graph.py` each extract the zip when `data/` holds no documents, and skip when it does. Run the command above by hand only to re-extract a corpus you have edited or deleted files from.
 
 ### Run
 
@@ -229,7 +234,9 @@ uv run prepare_graph.py --mode full               # build all 300 if needed
 uv run prepare_graph.py --mode lite --rebuild     # discard and rebuild
 ```
 
-`prepare_graph.py` is idempotent. Without `--rebuild` it creates any missing indexes, reports readiness, and skips extraction when the graph is already complete. `build_graph_lite.py` and `build_graph.py` are the plain unconditional builds behind it, always rebuilding their respective corpus.
+`prepare_graph.py` is idempotent. It checks the retrieval indexes against the embedding contract before it decides anything, creates them when they are missing, reports readiness, and skips extraction when the graph is already complete. `--rebuild` forces the extraction to run even against a graph that reports ready; the build clears the graph before it starts either way. `--check-only` writes nothing, so the two flags are mutually exclusive and passing both is an error rather than a silent choice between them. A successful build ends by seeding and verifying the Labs 4 and 5 fixtures, which is what step 7 of the notebook does.
+
+`NEO4J_DATABASE` is optional and defaults to `neo4j`. Every session `graph_builder.py` opens goes to it, and so does the fixture seed. Index creation and the fixture counts in [`workshop/src/workshop/retrieval_setup.py`](../workshop/src/workshop/retrieval_setup.py) still use the driver's home database, so pointing `NEO4J_DATABASE` at a database that is not the instance default is not yet supported end to end.
 
 ### Tests
 
@@ -238,11 +245,11 @@ cd 01-graph-build
 uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-**12 tests and 2 subtests**, all offline. No Neo4j instance, no AWS credentials, and no network:
+**12 tests and 2 subtests.** No Neo4j instance, no AWS credentials, and no network. Two of the twelve read the extracted corpus, so a clone that has not run `unzip -q -o hotel-faqs.zip -d data/` reports 10 passed and 2 skipped rather than failing:
 
 | File | Tests | What it pins |
 |---|:-:|---|
-| `test_bedrock_providers.py` | 5 | Conversation history is passed to Bedrock with roles and content intact, `ainvoke` times out instead of hanging, both clients apply `BEDROCK_CONFIG`, and the worst-case retry chain fits inside `DOC_TIMEOUT_SECONDS` |
+| `test_bedrock_providers.py` | 5 | Conversation history is passed to Bedrock with roles and content intact, `ainvoke` times out instead of hanging, both clients apply `BEDROCK_CONFIG` with adaptive retries, and the worst-case retry chain is the documented 270 seconds |
 | `test_retrieval_setup.py` | 6 | The lite sample contains every demo-critical source, a missing source is reported by filename, and the index contract accepts the expected indexes while failing clearly on a missing full-text index or wrong vector dimensions |
 | `test_graph_builder_metadata.py` | 1 | `ingest` passes `source_filename` through as document metadata, which is what `graph_setup.py` resolves fixture hotels by |
 
@@ -265,7 +272,7 @@ cd 01-graph-build
 caffeinate -i uv run prepare_graph.py --mode lite --rebuild
 ```
 
-`--rebuild` is what discards the partial graph. Without it, the readiness check may report the graph as merely incomplete and the counts will not line up. Leave the lid open; `caffeinate -i` blocks idle sleep, not lid-close sleep.
+The build clears the graph before it starts, so the partial graph is discarded either way. `--rebuild` skips the readiness check and extracts unconditionally, which is what you want after an interruption: the check counts documents and cannot tell a document that was fully extracted from one that was cut off part way. Leave the lid open; `caffeinate -i` blocks idle sleep, not lid-close sleep.
 
 **Bedrock access denied.** Two models have to be enabled, and the error names only the one that was called. Enable both `us.anthropic.claude-sonnet-5` and `amazon.nova-2-multimodal-embeddings-v1:0` in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), in the region `AWS_REGION` names. An extraction failure on every document points at the Claude model; extraction succeeding while chunks end up with no embedding points at Nova.
 

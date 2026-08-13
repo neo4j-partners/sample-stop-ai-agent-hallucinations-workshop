@@ -9,6 +9,9 @@ import sys
 import unittest
 from pathlib import Path
 
+# `workshop.graph_connection` raises at import unless both are set. Nothing
+# here connects, so placeholders keep the suite offline.
+os.environ.setdefault("NEO4J_URI", "bolt://test-only:7687")
 os.environ.setdefault("NEO4J_PASSWORD", "test-only")
 # `graph_config` is Lab 1's own module, so it is reached by path rather than by
 # package name. Everything else now comes from the installed `workshop` package.
@@ -53,12 +56,22 @@ def valid_index_records() -> list[dict]:
     ]
 
 
+DATA_DIR = Path(__file__).resolve().parent / "data"
+
+# `data/` is gitignored and holds the extracted corpus, so a fresh clone has
+# nothing to sample until `unzip -q -o hotel-faqs.zip -d data/` has run. This
+# one test reads it; the rest of the suite is pure offline.
+CORPUS_PRESENT = any(DATA_DIR.glob("*.txt"))
+
+
 class TestSourceFixtures(unittest.TestCase):
+    @unittest.skipUnless(
+        CORPUS_PRESENT, f"no extracted corpus in {DATA_DIR}; unzip hotel-faqs.zip first"
+    )
     def test_lite_sample_contains_every_demo_critical_source(self) -> None:
-        data_dir = Path(__file__).resolve().parent / "data"
         paths = [
-            data_dir / name
-            for name in select_lite_files(data_dir, max_docs=30)
+            DATA_DIR / name
+            for name in select_lite_files(DATA_DIR, max_docs=30)
         ]
         self.assertEqual(missing_source_fixtures(paths), [])
 

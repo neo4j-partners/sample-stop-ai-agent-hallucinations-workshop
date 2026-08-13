@@ -48,6 +48,11 @@ uv run setup/run_notebooks.py --labs 5 --include-deploy
 uv run setup/run_notebooks.py --labs 5 --include-cleanup
 ```
 
+Passing both flags in one run is safe. The registry lists Lab 5 in run order,
+`5.1`, `5.3`, `5.2`, rather than by number, so the deploy comes first, the
+walkthrough runs against a live Runtime, and the teardown goes last. Anything
+that deletes resources belongs last within its lab for that reason.
+
 The runner treats an uncaught cell error as a failure and exits nonzero when
 any selected notebook fails. A clean execution does not validate narrative or
 model-quality claims unless the notebook contains assertions for those claims.
@@ -97,10 +102,15 @@ written to the repo-root `.env` as a handful of identifiers.
   IAM, Lambda, and `bedrock-agentcore-control`. The region resolves from
   `AWS_REGION`, then `AWS_DEFAULT_REGION`, then defaults to `us-east-1`.
 - **Neo4j values in the repo-root `.env`** (`NEO4J_URI`, `NEO4J_USERNAME`,
-  `NEO4J_PASSWORD`, `NEO4J_DATABASE`). The script refuses to run if any are
-  missing, because they become the command secret.
-- **Amazon Bedrock model access.** The Runtime role authorizes
-  `us.anthropic.claude-sonnet-5` by default; override with `MODEL_ID`.
+  `NEO4J_PASSWORD`). The script refuses to run without those three, because they
+  become the command secret. `NEO4J_DATABASE` is optional and defaults to
+  `neo4j`, the same default the rest of the workshop uses.
+- **Amazon Bedrock model access.** This script picks no model and reads no
+  `MODEL_ID`. The Runtime role it creates grants `bedrock:InvokeModel` on
+  foundation models generally, and the model the deployed agent runs on,
+  `us.anthropic.claude-sonnet-5` unless `MODEL_ID` overrides it, is chosen by
+  `5.1_agentcore_deploy.ipynb` and passed into the container. Enable that model
+  in your region's Bedrock console.
 
 ### Commands
 
@@ -116,7 +126,17 @@ uv run setup/provision_agentcore.py teardown --yes # Delete without the confirma
 `provision` is idempotent: re-running it reuses existing roles, updates the
 secret and Lambda in place, and rewrites the managed `.env` keys rather than
 appending duplicates. `teardown` deletes in reverse dependency order (target,
-gateway, Lambda, roles, secret) and comments the managed keys back out of `.env`.
+gateway, Lambda, roles, secret) and removes the managed keys and their header
+line from `.env`, so nothing stale is left pointing at AWS.
+
+`teardown` deletes the three IAM roles by exact name, without a tag check, which
+is the one asymmetry with the other teardown half. It is deliberate.
+`workshop_cleanup.py` scans for resources it did not name, so it has to prove
+ownership from a tag and refuses anything untagged. This script deletes only the
+three names it just built from the prefix, never a prefix or wildcard match, so
+there is nothing to guess about. The incident recorded in
+[`../05-agentcore-deploy/CLEANUP.md`](../05-agentcore-deploy/CLEANUP.md) came
+from matching role names by prefix, which is a different thing entirely.
 
 ### What `provision` creates
 
@@ -125,7 +145,8 @@ tag is what separates this half from the half
 [`../05-agentcore-deploy/workshop_cleanup.py`](../05-agentcore-deploy/workshop_cleanup.py)
 owns, and neither script touches the other's resources. The names all share the
 `demo06` prefix, which you can override with the `DEMO06_PREFIX` environment
-variable.
+variable; see [Many participants, one account](#many-participants-one-account)
+below for what else moves when you do.
 
 | Resource | Name | Role |
 |----------|------|------|
@@ -136,6 +157,47 @@ variable.
 | Lambda function | `demo06-reservation-request` | The single reservation command behind the Gateway; its handler wraps `workshop.reservation_command.handler` from the shared package |
 | AgentCore Gateway | `demo06-gateway` | NONE-auth MCP Gateway exposing exactly one target |
 | Gateway target | `demo06-reservation-request` | The sole target, defined by [`../05-agentcore-deploy/deployment-tools/gateway_target.json`](../05-agentcore-deploy/deployment-tools/gateway_target.json), exposing only `create_reservation_request` |
+
+### Many participants, one account
+
+The default prefix is `demo06`, and every name above is built from it. One
+account per participant is the intended shape, and it is what a Workshop Studio
+event normally hands out. When a room shares one account, give each participant
+their own prefix instead:
+
+```bash
+export DEMO06_PREFIX=demo06-yourname
+```
+
+Export it before `provision`, before opening
+[`../05-agentcore-deploy/5.1_agentcore_deploy.ipynb`](../05-agentcore-deploy/5.1_agentcore_deploy.ipynb),
+and again before either teardown. Without it, everyone provisions the same
+Gateway, Lambda, secret and roles, everyone launches a Runtime under the same
+name, and `launch(auto_update_on_conflict=True)` overwrites rather than
+complaining. The first teardown then deletes the room's work.
+
+Three things move with the prefix, and all three are derived rather than
+written out:
+
+| Derived from the prefix | Default | With `DEMO06_PREFIX=demo06-alice` |
+|---|---|---|
+| Every resource name here, and the owner tag key | `demo06-*`, `demo06-agentcore=true` | `demo06-alice-*`, `demo06-alice-agentcore=true` |
+| The Gateway target, which is half of the MCP tool name | `demo06-reservation-request` | `demo06-alice-reservation-request` |
+| The AgentCore Runtime, and the ECR repository and CodeBuild project named after it | `HotelBookingAgent` | `HotelBookingAgentDemo06Alice` |
+
+The middle row is the one that used to break. `deployment-tools/gateway_target.json`
+carries the default spelling, so `provision` overrides the manifest's `name`
+with the prefixed one, and `5.1` passes that same name into the container as
+`GATEWAY_TARGET_NAME` beside `GATEWAY_URL`. The deployed agent builds its MCP
+tool name from it and refuses to run against a Gateway that publishes anything
+else, so both sides have to agree. Runtime names take letters, digits and
+underscores only, which is why the prefix is folded into CamelCase there.
+
+**A wrong prefix at teardown is the failure mode to watch for.** Both teardown
+halves derive their names the same way, so on a prefix that does not match what
+you provisioned they find nothing, report everything absent, and exit clean
+while your resources keep billing. Run `status` first if you are unsure which
+prefix an account was provisioned with.
 
 ### The `.env` handoff
 

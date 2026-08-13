@@ -1,4 +1,7 @@
 # The shared package brings the retriever this lab puts behind @tool.
 -e ../workshop
 
-strands-agents>=1.27.0
+# Upper-bounded on purpose. The 1.x line has already renamed a hook API once,
+# and this lab's MaxGuestsHook is written against BeforeToolCallEvent. Tested
+# against 1.52.0. Raise the ceiling deliberately, after re-running the notebook.
+strands-agents>=1.27.0,<2.0.0

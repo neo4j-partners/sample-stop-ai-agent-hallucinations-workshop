@@ -718,3 +718,310 @@ look broken.
 - **Phase 11, the rehearsal.** The only genuinely unfinished phase. Machine execution is measured at 311.2s across seven notebooks, and that is a floor, not a participant budget. A rehearsed per-lab time budget is what the facilitator guide still owes.
 - **A live pass over Lab 2's new Cypher.** `2.1`'s traversal was rewritten under L2-Q3 and L2-Q8 into a scoped `CALL (hotel) { … }` subquery with a per-type name cap and a map projection over a possibly-null `hotel`. The offline gate proves it parses; it has not run against a database.
 - **One Lab 6 run left on the shared Aura instance.** Lab 6's live acceptance run wrote 11 nodes under prefix `demo08-33d55968-`. It was left in place deliberately: `cleanup_memory.py` sweeps instance-wide, which is the exact L6-Q5 hazard, so deleting it is a decision for the instance's owner.
+
+---
+
+## Second quality review, 2026-08-13
+
+A second read-only pass over the finished tree, run as eight parallel reviewers: one
+per lab folder plus one covering the shared `workshop` package, the repo root, `setup/`,
+and `workshop-delivery/`. Every reviewer was told to verify against the tree rather than
+trust this document, because the first review recorded some findings as fixed that were
+not and some as outstanding that were already done. Findings use `LN-A*` and `SH-A*` to
+keep them distinct from the first pass's `LN-B*`, `LN-Q*`, and `SH-*`.
+
+**142 findings. Two blockers, 46 major, 94 minor. Nothing here has been fixed.** The
+recommended fixes are proposals, not applied changes.
+
+The first pass's closures hold up. Every reviewer independently confirmed the prior
+findings in its folder are genuinely closed: eight in Lab 1, eight in Lab 3, nine in
+Lab 4, fifteen in Lab 5, twelve in Lab 6. `2.1`'s rewritten Cypher, listed above as
+never having run against a database, is confirmed correct by reading: `CALL (hotel) { … }`
+is valid Neo4j 5.23+ variable-scope syntax and the subquery ends in an aggregation, so
+no rows drop. The five embedding and index constants still have exactly one definition,
+there is still exactly one embedder, and `images/six-lab-path.svg` is accurate to all
+six labs.
+
+### The two blockers
+
+Both are in Lab 6, and both only fire in the room, not in the offline gate.
+
+| ID | Finding | Recommended fix |
+|---|---|---|
+| L6-A1 | Both actors call `add_preference(category=PREFERENCE_CATEGORY, ...)` with the same category string. `LongTermMemory.add_preference` runs `FIND_DUPLICATE_PREFERENCES` at cosine `>= 0.95` filtered to that category with `DeduplicationConfig.enabled = True`. When Titan scores the two near-paraphrases above 0.95, Blake is linked to Alice's node. Section 4's `len(rows) != 1` guard still passes and prints Blake holding Alice's text, which is the exact failure the lab exists to teach against. Section 5 then dies with a misleading "re-run sections 2 and 3" | Give actor B its own category under `PREFERENCE_CATEGORY_PREFIX`, and assert `blake_preference.id != preference.id` |
+| L6-A2 | `cleanup_memory.py` has no run-scoped mode, no confirmation, and no dry run, and notebook cell 15 hands the instance-wide command to every participant. On a shared Aura instance the first participant to finish deletes twenty-nine others' in-flight data | Default to `--run-prefix`. Require an explicit `--all` plus a typed confirmation for the instance-wide sweep |
+
+### Lab 0, `00-setup/`
+
+Good shape for the self-service path. The hosted Workshop Studio path is not ready.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L0-A1 | major | The hosted path contradicts itself. The README tells hosted participants to hand-write Neo4j credentials while `.env.example` says CloudFormation writes `/workshop/.env` using `NEO4J_USER`. Step 3's unconditional `cp .env.example .env` can shadow the generated file with `NEO4J_PASSWORD=changeme` | `00-setup/README.md:38,50-56`; `.env.example:8-11` | Add a hosted branch to Step 3 that checks for the generated file first |
+| L0-A2 | major | Lab 0's only executable is a fenced heredoc. It is untested, absent from the runner, and restates four values that must have one definition: `DEFAULT_MODEL_ID`, `EMBEDDING_MODEL_ID`, `EMBEDDING_PURPOSE`, and `1024` | `00-setup/README.md:95-155` | Ship `00-setup/verify_setup.py` as a PEP 723 script that imports the four values from `workshop` |
+| L0-A3 | major | Lab 0 never says "do this before the session" and gives no time estimate, yet the facilitator guide depends on participants arriving with it done. The root README FAQ omits Lab 0 entirely | `00-setup/README.md`; `workshop-delivery/README.md:85` | Open with "Budget 20 to 30 minutes, and start Step 4 first" |
+| L0-A4 | major | The AWS CLI is used (`aws sts get-caller-identity`) but appears in neither prerequisite list, and nothing tells the reader to restart the kernel after changing credentials | `00-setup/README.md` | Add the CLI to prerequisites and a kernel-restart note |
+| L0-A5 | major | Root README test counts are stale: 20 for Lab 5 and 22 for Lab 6, actual 29 and 27 | `README.md:198` | 12 / 56 / 29 / 27 |
+| L0-A6 | minor | The `.env.example` placeholder is described as `bolt://localhost:7687`; it is `neo4j+s://<your-instance>...` | `00-setup/README.md:62` | Correct the description |
+| L0-A7 | minor | An orphaned nbstripout paragraph contradicts the root README's instructions | `00-setup/README.md` | Delete it and point at the root README |
+| L0-A8 | minor | Four dead Workshop Studio variables ship in `.env.example`: `NEO4J_HOST`, `NEO4J_SECRET_ARN`, `SECURITY_GROUP_ID`, `SUBNET_IDS`. Only a retired notebook reads them | `.env.example` | Delete all four |
+| L0-A9 | minor | `AGENT_RUNTIME_ARN` is attributed to provisioning; `5.1` writes it | `.env.example` | Reattribute to `5.1` |
+| L0-A10 | minor | Both `AWS_REGION` and `AWS_DEFAULT_REGION` ship, only one is documented | `.env.example` | Document the precedence, or drop one |
+| L0-A11 | minor | The verify script requires `NEO4J_DATABASE` while `contracts.py` defaults it | `00-setup/README.md`; `workshop/src/workshop/contracts.py:44-46` | Make it optional, matching the package |
+| L0-A12 | minor | The Python 3.12 guard sits below the third-party imports, so it never fires: the import error comes first | `00-setup/README.md` verify block | Move the guard to the top |
+| L0-A13 | minor | No detection of a lab-local `.env` shadowing the root one, which is the documented precedence rule | `00-setup/README.md` | Have the verify script report which `.env` won |
+| L0-A14 | minor | No troubleshooting rows for Bedrock `ThrottlingException` or for the heredoc failing under Windows PowerShell | `00-setup/README.md` | Add both rows |
+| L0-A15 | minor | Step 4 is titled "Confirm" but it is where the reader requests model access, which can take time | `00-setup/README.md` | Retitle to "Request and confirm" |
+| L0-A16 | minor | The verify script never exercises Titan, so a Lab 6 access failure surfaces three hours into the session | `00-setup/README.md` | Add a Titan embed call |
+| L0-A17 | minor | Lab 0 carries none of the through-line or the six-lab map, and lacks the footer and Previous/Next navigation every other lab has | `00-setup/README.md` | Add both |
+| L0-A18 | minor | "Fill in these five values" when only two need typing | `00-setup/README.md` | Say which two |
+| L0-A19 | minor | The rehearsal instructions send the facilitator to "step 4" for the verify script; it is Step 5 | `workshop-delivery/README.md:91` | Correct the reference |
+
+### Lab 1, `01-graph-build/`
+
+The most carefully engineered lab. The notebook is clean, all eight prior fixes are
+closed, and the suite is 12 passed plus 2 subtests. The problems concentrate on the
+script path, which is the path a facilitator uses and a participant does not.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L1-A1 | major | `prepare_graph.py` never calls `apply_lab4_fixtures`, so the CLI path produces no fixture `hotel_id`, no `demo06_*` constraints, and no `max_guests` Rule, while the README claims "either path produces the same graph." A facilitator who builds by script hands Lab 4 a graph that cannot run | `01-graph-build/prepare_graph.py:77-121`; `README.md:41,222` | Call `apply_lab4_fixtures` then `readiness_problems` at the end of `main()` |
+| L1-A2 | major | `--rebuild` skips `ensure_retrieval_indexes` because `if not args.rebuild:` wraps it, which reintroduces the doomed fifteen-minute build the pre-check exists to prevent. It surfaces as an uncaught `ReadinessError` after ingest has already finished | `01-graph-build/prepare_graph.py:85-119` | Move the index check above the branch |
+| L1-A3 | major | `graph_builder.py` builds `BedrockLLM(...)` with no `model_id`, and `bedrock_providers.BedrockLLM.__init__` defaults to the literal `DEFAULT_MODEL_ID` rather than calling `default_model_id()`. The documented `MODEL_ID` override therefore applies to Labs 2 through 5 but silently not to Lab 1's 33 extraction calls | `01-graph-build/graph_builder.py:77-80`; `workshop/src/workshop/bedrock_providers.py:150` | Default the parameter to `default_model_id()` |
+| L1-A4 | major | One lost document forces a full fifteen-minute redo. `ingest` swallows per-document errors, the count assertion then fires, and `run_build` always clears the graph first. No retry pass, no resume, and no warning that a partial failure is unrecoverable | `01-graph-build/graph_builder.py` | Add a retry pass over failed documents before the count assertion |
+| L1-A5 | major | `build_graph.py` and `build_graph_lite.py` are dead weight. Nothing imports them, they skip both corpus auto-extraction and the readiness pre-check, and the README has to warn participants away from them | `01-graph-build/` | Delete both |
+| L1-A6 | major | The lab ends without the participant ever looking at the graph. No Neo4j Browser query, no subgraph, no visual payoff for the lab whose whole product is a graph | `1.1_build_graph.ipynb` | Add a copy-pasteable Browser query after step 7 |
+| L1-A7 | minor | Cell 14 is not guarded on `INDEX_ERROR` while cell 12 is | `1.1_build_graph.ipynb` | Match cell 12's guard |
+| L1-A8 | minor | `--check-only` is silently ignored when combined with `--rebuild` | `prepare_graph.py` | Reject the combination |
+| L1-A9 | minor | The README calls the suite fully offline, but two tests read gitignored `data/` | `01-graph-build/README.md` | Say the two tests skip without the corpus |
+| L1-A10 | minor | The README misdescribes what `--rebuild` does | `01-graph-build/README.md:268` | Correct it |
+| L1-A11 | minor | `NEO4J_DATABASE` is ignored by the build but honoured by the fixture seed, so a non-default database half-works | `graph_builder.py:108,117,159,239,253` | Thread the database through the build |
+| L1-A12 | minor | Dangling `query_knowledge_graph` references to a deleted Lambda | `build_graph.py:6`; `graph_builder.py:155` | Remove |
+| L1-A13 | minor | Old-demo naming in code participants open: `clear_demo_graph`, "for the Graph-RAG demo" | `graph_builder.py` | Rename to lab vocabulary |
+| L1-A14 | minor | Three unreferenced PNGs, 272 KB | `01-graph-build/images/` | Delete |
+| L1-A15 | minor | `OFF_SCHEMA_LABELS` is never shown, so the value of pinning the schema is asserted and never evidenced | `1.1_build_graph.ipynb` | Print what the pin excluded |
+| L1-A16 | minor | Unused `numpy>=1.24.0` | `01-graph-build/requirements.txt` | Remove |
+| L1-A17 | minor | The corpus-extraction cell is unlabelled and absent from the README's cell table | `1.1_build_graph.ipynb`; `README.md` | Label and list it |
+| L1-A18 | minor | A test docstring documents a command that cannot work | `test_bedrock_providers.py:23-26` | Correct the docstring |
+| L1-A19 | minor | `--mode` is the only flag with no `help=` | `prepare_graph.py` | Add help text |
+| L1-A20 | minor | Em-dash in a comment | `.gitignore:20` | Replace with a comma |
+
+### Lab 2, `02-retrieval/`
+
+Structurally good and no blockers. The preamble is byte-identical across all three
+notebooks. The headline finding is a claim that gets falsified on the projector by the
+next cell.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L2-A1 | major | The notebook claims the rating and amenity list "are not in the matched chunk," but `CHUNK_SIZE = 12000` makes each 7.1 KB document a single chunk, and `hotel-cairo-001.txt:6` is `**Guest Rating:** 4.5/5.0` at roughly character 130. The very next cell prints `chunk_evidence[:600]` and shows it | `2.2_hybrid_and_traversal.ipynb` cell 11; `02-retrieval/README.md:52` | Borrow `2.1` cell 12's honest wording, which makes the same point without the false claim |
+| L2-A2 | major | Cells 15 and 17 print every agent answer twice: `print(grounded_agent(...))` on top of `PrintingCallbackHandler`. The L4-B1 fix was never propagated here | `2.2_hybrid_and_traversal.ipynb` cells 15, 17 | Drop the explicit `print`, and carry over Lab 4's explanatory comment |
+| L2-A3 | major | The plain-vector baseline prints a Python dict repr with literal `\n` escapes instead of chunk text, because `VectorRetriever.default_record_formatter` sets `content=str(node)`. Three occurrences in `2.1`, ten in `2.2` | both notebooks | Pass a `result_formatter` returning `RetrieverResultItem(content=record["node"]["text"], ...)` |
+| L2-A4 | major | The `60611` comparison is hand-tuned with `ranker="linear", alpha=0.2` and never disclosed, while the surrounding markdown says "Those are the comparisons you just ran" | `2.2_hybrid_and_traversal.ipynb` cell 10 | Disclose the tuning, or use defaults and let the result stand |
+| L2-A5 | major | Only the hybrid arm is asserted. If the vector arm returns the `60611` chunk in its top 5, the printed verdict contradicts the markdown. This has never been run against a database | `2.2_hybrid_and_traversal.ipynb` | Assert both arms |
+| L2-A6 | minor | The traversal emits a spurious `None:` group for chunks with no `:Hotel` | `2.1_vector_and_graph.ipynb` | Filter nulls in the projection |
+| L2-A7 | minor | The traversal delta is described, never shown side by side | `2.2_hybrid_and_traversal.ipynb` | Print both results together |
+| L2-A8 | minor | `retrieval_patterns.ipynb` is tracked, opens "# Optional Demo 01b", and is unmarked as retired, so it reads as maintained | `02-retrieval/retrieval_patterns.ipynb` | Banner it as retired reference material |
+| L2-A9 | minor | README troubleshooting names a "check-in" question no notebook asks | `02-retrieval/README.md` | Use a real question |
+| L2-A10 | minor | `2.3`'s `BedrockLLM` ignores `MODEL_ID`, same root cause as L1-A3. A participant who sets the override gets a working `2.2` and an AccessDenied `2.3` | `2.3_text2cypher.ipynb` cell 7 | Closed by the L1-A3 fix |
+| L2-A11 | minor | Prints "Same scores, in the same order" with no check | `2.1_vector_and_graph.ipynb` cell 11 | Assert it, or soften the claim |
+| L2-A12 | minor | The hybrid block is labelled with the wrong question text | `2.2_hybrid_and_traversal.ipynb` | Correct the label |
+| L2-A13 | minor | Unguarded `results[0]` | `02-retrieval/` notebooks | Guard the index |
+| L2-A14 | minor | "Environment ready" verifies nothing, and its `!pip install` contradicts the README's `uv` path | all three notebooks | Verify something, and drop the pip line |
+| L2-A15 | minor | Two unused embedding constants imported | `2.3_text2cypher.ipynb` | Remove |
+| L2-A16 | minor | "Connection closed." overstates: the lru-cached driver in `hybrid_retrieval` stays open | `02-retrieval/` notebooks | Reword |
+| L2-A17 | minor | The abstention evidence shown comes from a separate call, not the agent's | `2.2_hybrid_and_traversal.ipynb` | Show the agent's own tool result |
+| L2-A18 | minor | No time budget in the README | `02-retrieval/README.md` | Add one |
+| L2-A19 | minor | A literal em-dash rendered via `&mdash;` | cell 5 of all three notebooks | Replace with a comma or period |
+
+### Lab 3, `03-agents-and-tools/`
+
+The cleanest lab on mechanics. All seven `Agent(...)` calls pass an explicit `model=`,
+there is no variable rebinding, the Summary sits after section 6, and all eight prior
+findings are closed.
+
+**On whether Lab 3 earns its own folder:** yes, but only after the swarm and
+token-counting sections are cut or re-motivated. It is where the Lab 2 retriever becomes
+a tool and where `hotel_agent` is born; folding it into Lab 4 would force Lab 4 to carry
+two theses. Trimming to sections 1, 2, 3, 4, and 6 removes roughly 89 seconds from the
+slowest notebook in the tree.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L3-A1 | major | The swarm section asserts a three-node handoff outcome the runtime may not produce. Only the Validator's prompt mentions handing off, and Strands ends the swarm when the current agent does not hand off. The section was carried verbatim from the deleted getting-started notebook and never says when a swarm beats one agent | `3.1_agents_and_tools.ipynb` cells 17-20; `strands/multiagent/swarm.py` `_build_node_input` | Cut it, or rewrite every node prompt to mention handoff and state the "when to reach for this" case |
+| L3-A2 | major | Cells 3, 5, and 12 print every answer twice. Cells 8, 9, 10, 15, 16, 19, 20, 23, and 24 do it correctly | `3.1_agents_and_tools.ipynb` | Drop the explicit `print` in the three |
+| L3-A3 | major | The one-field tool contract, meaning why the `@tool` wrapper exposes only `query`, exists only in the README and never in the notebook. The strongest teaching content in the lab is missing from the thing participants actually read | `03-agents-and-tools/README.md:53`; notebook cell 6 | Move it into cell 6's markdown |
+| L3-A4 | minor | Section "3.5 Token Counting" is a vestige of the deleted semantic-tools demo with no real consumer | `3.1_agents_and_tools.ipynb` | Cut, or tie it to a decision the participant makes |
+| L3-A5 | minor | Cell 0 promises five concepts; seven sections ship | `3.1_agents_and_tools.ipynb` | Reconcile |
+| L3-A6 | minor | Cell 24 is gated on `AGENT_READY` alone though the tool needs Neo4j; cell 23 correctly gates on `GRAPH_READY` | `3.1_agents_and_tools.ipynb` cell 24 | Match cell 23 |
+| L3-A7 | minor | `agent_bedrock` is constructed and never invoked, burning a Bedrock call on "Say hello" | `3.1_agents_and_tools.ipynb` | Use it or delete it |
+| L3-A8 | minor | The README overstates continuity: "registers onto this same `hotel_agent`" when Lab 4 rebuilds it and names the tool `create_reservation_request_tool` | `03-agents-and-tools/README.md:95` | Say Lab 4 rebuilds it with the write tool added |
+| L3-A9 | minor | `strands-agents>=1.27.0` is unbounded across Labs 2, 3, 4, and 5 while the venv resolves 1.52.0, and the 1.x line has already renamed a hook API once | four `requirements.txt` files | Add an upper bound, or a lockfile |
+| L3-A10 | minor | The cost estimate uses Anthropic first-party $3/$15 rates on a Bedrock-hosted model | `3.1_agents_and_tools.ipynb` | Use Bedrock pricing |
+| L3-A11 | minor | The README footer says 1.27+ without naming the tested version | `03-agents-and-tools/README.md` | Name 1.52.0 as tested |
+
+### Lab 4, `04-grounded-write/`
+
+The write path is well engineered. 56 tests confirmed exact at 22+12+12+7+3, dates are
+computed from `date.today()`, and all nine prior fixes are closed. The weakness is that
+the payoff lab under-demonstrates its own thesis: the strongest claims are stated in
+markdown and never shown in output.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L4-A1 | major | "The limit is nowhere in the prompt" is never shown. `GROUNDING_INSTRUCTIONS` is concatenated in from an import and never displayed, so the room is asked to take the lab's central claim on faith | `4.1_grounded_write.ipynb` | `print(hotel_agent.system_prompt)` followed by `assert not any(c.isdigit() for c in ...)` |
+| L4-A2 | major | Cell 18 claims "the over-limit id left no row at all" but cell 19 asserts only on `BOOKING_REQUEST_ID` | `4.1_grounded_write.ipynb` cells 18-19 | Add a zero-row count for `OVER_LIMIT_REQUEST_ID` |
+| L4-A3 | major | Both agent turns assert nothing, so a model that answers without calling the tool still yields a green notebook | `4.1_grounded_write.ipynb` cells 10, 16 | Assert the tool fired |
+| L4-A4 | major | The agent is never shown successfully taking the action. Both agent turns are rejections; the accepted write and the idempotent retry are direct Python calls | `4.1_grounded_write.ipynb` | Add one agent turn that succeeds |
+| L4-A5 | major | "Grounded" is asserted, not shown. `hero_id` comes from the fixture manifest, and `search_hotel_knowledge_tool` almost certainly never fires in this notebook | `4.1_grounded_write.ipynb` | One cell calling `search_hotel_knowledge(...)` and asserting the returned `hotel_id == hero_id` |
+| L4-A6 | major | "Rebuild it here with three changes" is four. Lab 3's `book_room` is silently dropped, and its removal, a simulated tool that always returned `SUCCESS`, is the best available beat in the lab | `4.1_grounded_write.ipynb` | Say four, and make the fourth the point |
+| L4-A7 | major | `01_hybrid_retrieval.ipynb` sorts first in the folder, opens "# Demo 06", duplicates Lab 4's write cells, links to nonexistent paths, and had its imports repointed at `workshop.*`, so it reads as maintained | `04-grounded-write/01_hybrid_retrieval.ipynb` | Banner it as retired, or move it out of the participant folder |
+| L4-A8 | minor | Idempotency is introduced backwards: cell 11 shows `duplicate=true` before section 4 explains it | `4.1_grounded_write.ipynb` | Reorder |
+| L4-A9 | minor | Re-running cell 14 alone fails its assertion | `4.1_grounded_write.ipynb` cell 14 | Make it re-runnable, or say it is not |
+| L4-A10 | minor | Unused `bedrock-agentcore-starter-toolkit` inflates the dependency set from 58 to 89 packages | `04-grounded-write/requirements.txt` | Remove |
+| L4-A11 | minor | "First delivery:" is mislabelled | `4.1_grounded_write.ipynb` | Relabel |
+| L4-A12 | minor | `test_demo_guest_consistency.py` and `Demo06ContractTests` are old-numbering identifiers that are not frozen and are visible in `pytest -v` | `04-grounded-write/` | Rename |
+| L4-A13 | minor | Five `demo06*` identifiers appear with no note explaining that they are frozen | `4.1_grounded_write.ipynb` | Add one sentence |
+| L4-A14 | minor | Missing bridging markdown in section 5 | `4.1_grounded_write.ipynb` | Add it |
+| L4-A15 | minor | The write tool opens its own driver while surrounding cells reuse one | `4.1_grounded_write.ipynb` | Note why, or reuse |
+| L4-A16 | minor | `ReservationRequest` rows accumulate across runs with no cleanup note | `04-grounded-write/README.md` | Add a cleanup query |
+| L4-A17 | minor | 12 of the 56 tests actually cover Lab 2's retriever | `04-grounded-write/` | Say so, or move them |
+| L4-A18 | minor | The README implies the closed JSON schema bounds Lab 4's runtime path; the runtime bound is `_validate_command` | `04-grounded-write/README.md` | Correct the attribution |
+| L4-A19 | minor | The guest limit is written as a prose literal | `04-grounded-write/CONTRACTS.md:62` | Reference the graph-resident Rule instead |
+
+### Lab 5, `05-agentcore-deploy/`
+
+The fifteen prior fixes are genuinely fixed, the packaging chain is coherent and
+self-checking, and the teardown is the most carefully built thing in the repository.
+Two problems dominate: the lab's central claim is the one claim its smoke tests do not
+establish, and no document anywhere addresses more than one participant per account.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L5-A1 | major | Test 3 prints "the graph rule refused 15 guests" while asserting only that a tool name appeared in `tools_used` and that no row exists. `_tools_used` reads `result.metrics.tool_metrics`, which records an *attempted* call, so a call the local `ReservationRequestGuard` cancelled, a Lambda that failed on auth, and a Gateway 5xx all satisfy both assertions and print the same PASS. The command's real verdict is computed in the container and never leaves it | `5.1_agentcore_deploy.ipynb` cell 16; `deployment-tools/booking_agent.py:178-181,236-241` | Have `invoke` return the last command tool result as a fourth key, and assert `reason_code == "max_guests_exceeded"`. This is the one assertion that separates "the graph rule refused it" from "something broke between the agent and the graph" |
+| L5-A2 | major | Nothing addresses many participants sharing one AWS account, which is the normal Workshop Studio shape. `RUNTIME_NAME`, the ECR repository, the CodeBuild project, and every `demo06-*` name is a fixed singleton. Thirty participants overwrite each other's Runtime, silently, because `auto_update_on_conflict=True`, and the first `5.2` deletes everyone's | `5.1` cells 3, 9; `setup/provision_agentcore.py:65`; `README.md` | State "one account per participant" in the lab prerequisites and `setup/README.md`, or document a per-participant suffix |
+| L5-A3 | major | Two documents say `DEMO06_PREFIX` overrides the prefix, but `booking_agent.py` hardcodes `GATEWAY_TARGET_NAME` and raises when the discovered tool list is not exactly the one name. Setting the variable provisions fine and then produces a Runtime that fails on every invocation. This is precisely the lever a facilitator reaches for to solve L5-A2 | `05-agentcore-deploy/README.md:56`; `setup/README.md:127`; `booking_agent.py:40,167-175` | Read the target name from an env var, which is one line each side, or delete both sentences |
+| L5-A4 | major | `deploy_agentcore.ipynb` sits in the participant folder with the most inviting title in it and no warning. It creates DynamoDB tables, seven Lambdas, and a second Gateway, references a `query_knowledge_graph` Lambda that no longer exists so it dies partway with resources already created, and points at `08-cleanup/` | `05-agentcore-deploy/deploy_agentcore.ipynb` | Move it under `advanced-deployment/`, or prepend a superseded banner |
+| L5-A5 | major | `5.2` cell 4 blocks for roughly 146 seconds with no output. The timing is documented only in `CLEANUP.md`, which also notes the plan step runs twice and can exceed ten minutes on an account with legacy resources. A participant with a silent cell concludes the kernel hung and interrupts a teardown | `5.2_teardown.ipynb` cells 3-4, 9-10; `CLEANUP.md:310-317` | Put the timing in the markdown immediately above the dry run |
+| L5-A6 | major | The runner registry orders 5.1, 5.2, 5.3, so passing `--include-deploy --include-cleanup` together tears the Runtime down and then runs the walkthrough against a deleted ARN. Both flags are documented side by side | `setup/run_notebooks.py:120,125,130` | Register 5.3 before 5.2, or sort `deletes_resources` last within a lab |
+| L5-A7 | major | `5.3`'s "What to look for" tells the reader to check the output for `status`, `reason_code`, and `duplicate`. The payload contains only `response`, `request_id`, and `tools_used` | `5.3_agentcore_walkthrough.ipynb` closing cell | Closed by the L5-A1 fix. Until then, point at the graph read and CloudWatch cells, which do show it |
+| L5-A8 | major | The Gateway is created with `authorizerType="NONE"`, so the MCP endpoint can write `ReservationRequest` nodes into the participant's graph by URL alone. `advanced-deployment/DEPLOYMENT.md` states this accurately, but no participant-facing document flags it | `setup/provision_agentcore.py:783` | One sentence in the lab README: the Gateway is unauthenticated to keep the lab short, treat the URL as a credential, run both teardowns |
+| L5-A9 | major | Nine "Demo 06" strings survive in `provision_agentcore.py`. Four print in the first command a Lab 5 participant runs, and five land in permanent AWS resource Descriptions | `setup/provision_agentcore.py:87,310,349,713,783,873,914,977,983` | Rewrite the English only. The `demo06` prefix, the `demo06-agentcore=true` tag, and `ENV_HEADER`'s key names stay. Note `ENV_HEADER` is matched literally by `clear_env`, so changing that string strands stale headers through teardown |
+| L5-A10 | minor | "Run them in order from this directory" sits under a table listing 5.1, 5.2, 5.3, which reads as teardown before walkthrough | `05-agentcore-deploy/README.md:74-80` | State it: 5.1, then 5.3 if wanted, then 5.2 last |
+| L5-A11 | minor | Still says `5.3` needs `AGENT_RUNTIME_ARN` set by hand; `5.1` has upserted it since the L5-B3 fix | `advanced-deployment/README.md:36` | Update |
+| L5-A12 | minor | Two documents say teardown "comments out" managed `.env` keys; it deletes them and the header | `provision_agentcore.py:241-253`; `README.md:187` | Say "removes" |
+| L5-A13 | minor | `cmd_teardown` deletes three roles by exact name with no tag check, in a repository whose other teardown half refuses to touch an untagged resource and whose `CLEANUP.md` records the five-roles incident. Exact-name matching is far safer than the prefix match that caused it, but the asymmetry is unexplained | `provision_agentcore.py:955,1003-1009` | Check the tag, or comment that exact-name deletion of a self-created name is deliberate policy |
+| L5-A14 | minor | Cell 11 raises a friendly `RuntimeError` about `RUNTIME_ARN`, but on the path where it matters the name was never bound, so `NameError` fires first and the guidance never prints | `5.1_agentcore_deploy.ipynb` cell 11 | Initialize `RUNTIME_ARN = ""` before the try |
+| L5-A15 | minor | Root README says 20 tests in Lab 5; it is 29. That is exactly the number that was wrong when those 9 tests silently failed to collect | `README.md:198` | Change to 29 |
+| L5-A16 | minor | `test_runtime_image_excludes_lambda_and_legacy_notebooks` asserts on a string that appears only inside a `.dockerignore` comment, so deleting the comment fails the test and deleting a real rule does not | `deployment-tools/test_runtime_integration.py` | Assert on the active exclusion lines |
+| L5-A17 | minor | `booking_agent.py` and `provision_agentcore.py` each hold a third and fourth copy of `DEFAULT_MODEL_ID`. The container copy is defensible and unexplained; the script copy is not | `booking_agent.py:33`; `setup/provision_agentcore.py` | Import it in the script; comment the deliberate duplication in the container |
+| L5-A18 | minor | The file tree describes `tool_schemas/` as "Tool definitions" alongside `gateway_target.json`, but `tools.json` is read only by Lab 4's `test_contracts.py` | `05-agentcore-deploy/README.md` | Say which file the Gateway uses |
+| L5-A19 | minor | Retired numbering "Demo 06A · Notebook 2" in a tracked file the README points at | `advanced-deployment/02_agentcore_walkthrough.ipynb` | Banner or renumber |
+| L5-A20 | minor | Spec drift: `new-content.md` says `5.2` is 11 cells (it ships 13) and describes `CONFIG_FILES` as one entry (it has two). The code is right; the spec is stale | `new-content.md` Lab 5 section | Update the spec, or mark it historical |
+| L5-A21 | minor | "The lines to read closely are any marked `UNTAGGED_BLOCKED`" points at a cell that filters on `will_delete`, which excludes exactly those | `5.2_teardown.ipynb` cells 5-6 | Point back at the dry-run output |
+
+### Lab 6, `06-memory/`
+
+The most carefully written folder in the tree, and the one holding both blockers.
+All twelve prior findings are genuinely closed and the 27 tests pass offline. The
+blockers are L6-A1 and L6-A2 above.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| L6-A3 | major | The Browser query is scoped to the bare `demo08-` prefix, so it shows everyone's runs on a shared instance, including the leftover `demo08-33d55968-` nodes from the acceptance run. The escape hatch points at a `RUN_PREFIX` that cell 3 never prints | `6.1_agent_memory.ipynb` cell 12 | Print `RUN_PREFIX` in cell 3 and scope the query to it |
+| L6-A4 | major | Section 4 is titled "Recall in a fresh session," but `ACTOR_PREFERENCE_RECALL` takes no session parameter and `SESSION_A2` is never read back. The fresh session is decoration | `6.1_agent_memory.ipynb` section 4 | Either query by session, or retitle to "Recall for the same actor" |
+| L6-A5 | major | No preflight for the third model. `MEMORY_READY` checks boto3 credentials only, so an unenabled Titan surfaces as a raw `AccessDeniedException` from inside the library at the first `add_message`, three hours into the workshop | `6.1_agent_memory.ipynb` | Add a Titan embed call to the readiness check, with the same named-cause message the other labs use |
+| L6-A6 | minor | Root README says 22 tests; there are 27 | `README.md:198` | Change to 27 |
+| L6-A7 | minor | `smoke_test.py` writes `memory-smoke-*` ids outside the `demo08-` namespace, so its leaks are invisible to cleanup | `smoke_test.py:104-105` | Move them under the namespace |
+| L6-A8 | minor | The comparison table's first row puts this lab's own choice inside the AgentCore Memory column | `06-memory/README.md` | Correct the column |
+| L6-A9 | minor | The notebook never explains why a lab numbered 6 stamps `08` | `6.1_agent_memory.ipynb` | One sentence: the prefix is frozen from the prior numbering |
+| L6-A10 | minor | Mixed "demo" and "lab" vocabulary | `cleanup_memory.py:3`; `memory_helpers.py:3,29,37`; `smoke_test.py:3,15` | Standardize on lab |
+| L6-A11 | minor | Four separate `MemoryClient` open and close cycles make this the slowest notebook in the tree | `6.1_agent_memory.ipynb` | Open once |
+| L6-A12 | minor | The closing's only forward pointer is an internal `architecture.md` | `6.1_agent_memory.ipynb` | Point at something a participant can use after they leave |
+
+### Shared package, repo root, `setup/`, and `workshop-delivery/`
+
+The shared surface is close to deliverable and the package is genuinely cohesive. What
+remains is a documentation-truth problem rather than a code problem: three of the four
+in-scope prose files carry at least one claim the tree contradicts, and the repository
+ships 142 KB of internal rebuild planning to every cloner.
+
+| ID | Severity | Finding | Where | Recommended fix |
+|---|---|---|---|---|
+| SH-A1 | major | No rehearsed per-lab participant time budget exists, so the delivery guide cannot answer the first question a facilitator asks. It is acknowledged as outstanding in three separate places | `README.md:290`; `workshop-delivery/README.md:64`; `architecture.md:550` | Run one timed rehearsal and replace the "still outstanding" sentence with a per-lab minute column in the schedule table |
+| SH-A2 | major | Root README test counts are wrong for two of four suites: 20 and 22 against an actual 29 and 27 | `README.md:198` | "12 tests in Lab 1, 56 in Lab 4, 29 in Lab 5, and 27 in Lab 6" |
+| SH-A3 | major | The facilitator prerequisite list says to create two Secrets Manager secrets with two Neo4j users. The executable path has exactly one, and no code reads a second | `workshop-delivery/README.md:83` | Rewrite to one command secret plus Runtime environment variables, matching `setup/README.md:151-155`, and move the two-secret form to a "going further" note |
+| SH-A4 | major | Nothing mentions Bedrock quotas or throttling, while `BEDROCK_CONFIG` allows three total attempts. Thirty simultaneous Lab 1 builds is an unhandled room-wide failure mode | `workshop/src/workshop/bedrock_providers.py:41`; `workshop-delivery/README.md:77` | Add a quota prerequisite for the two Lab 1 models, and switch to `{"max_attempts": 5, "mode": "adaptive"}` |
+| SH-A5 | major | `new-content.md` and `new-content-plan.md` are tracked, so every cloner of this public sample repo receives 142 KB of internal planning including a defect list and live-run evidence | repo root | Untrack both and gitignore them, or move them under an ignored `workshop-delivery/internal/` |
+| SH-A6 | major | No `.github/` and no CI anywhere, so the deliberately credential-free green-offline design is never exercised automatically | repo root | One workflow running `setup/run_notebooks.py` with no credentials plus the four pytest suites |
+| SH-A7 | major | `provision_agentcore.py` writes `# --- Demo 06 AgentCore deploy ---` verbatim into every participant's `.env`, contradicting the header `.env.example` documents | `setup/provision_agentcore.py:87` and eight more | Same sweep as L5-A9. Leave `PREFIX`, `TAG_KEY`, and every `demo06-` identifier untouched |
+| SH-A8 | major | The architecture module table understates importers: `bedrock_providers.py` is listed as Labs 1 and 2 but is imported by 1 through 5, and `contracts.py` is listed as 2, 4, 5 but is also imported by `1.1` | `workshop-delivery/architecture.md:474,478` | Correct both rows |
+| SH-A9 | minor | The frozen retrieval Cypher hardcodes `LIMIT 12` and `left(..., 1200)` while `MAX_AMENITIES` and `MAX_EVIDENCE_CHARS` are the named constants used everywhere else, so changing a constant silently stops changing the query | `workshop/src/workshop/hybrid_retrieval.py:55,58` | Build `RETRIEVAL_QUERY` as an f-string over the two constants, with a comment noting they are the only interpolated values |
+| SH-A10 | minor | `graph_setup.py` redefines the required-environment tuple `contracts.REQUIRED_NEO4J_ENV` already owns, and hardcodes the database name `contracts.DEFAULT_NEO4J_DATABASE` already owns | `graph_setup.py:410,425` | Delete `REQUIRED_ENV_VARS` and reference the two constants |
+| SH-A11 | minor | `graph_setup.py` opens its driver without `notifications_min_severity="OFF"`, so Lab 1's closing fixture step can print notifications the Lab 2 and Lab 4 paths both suppress | `graph_setup.py:457` | Add the option |
+| SH-A12 | minor | `provision_agentcore.py` refuses to run without `NEO4J_DATABASE` while the root README says it is optional | `provision_agentcore.py:182-189` vs `README.md:306` | Drop it from `missing` and default it |
+| SH-A13 | minor | `graph_connection.py` fails loudly on a missing password but silently defaults `NEO4J_URI` to `bolt://127.0.0.1:7687`, turning a forgotten URI into a localhost timeout | `graph_connection.py:19` | Treat a missing URI the same way, or name the default in the raise message |
+| SH-A14 | minor | `CLAUDE.md` is gitignored, so the file documenting this repo's conventions and its two sharpest gotchas never reaches a fresh clone, while `CONTRIBUTING.md` ships | `.gitignore:59` | Track it. It contains no secrets and is the best contributor orientation in the tree |
+| SH-A15 | minor | `.gitignore` carries FAISS-era artifacts whose comment names a deleted script, two entries from an unrelated repo lineage, and one em-dash | `.gitignore:20,85-92` | Delete the `/blog_es`, `/create-dump`, and `faqs_*` blocks; replace the em-dash |
+| SH-A16 | minor | The delivery guide installs nbstripout with `pip` while the root README uses `uv tool install`, and everything else in both files is uv-based | `workshop-delivery/README.md:124` | Use `uv tool install` |
+| SH-A17 | minor | Deleted-demo vocabulary survives in the shared package's public constant names and docstrings, and leaks into facilitator prose as "demo-critical source file" | `retrieval_setup.py:25,33,55,121,150,267`; `workshop-delivery/README.md:99` | Rename the three `DEMO_*` constants to `REQUIRED_*` or `FIXTURE_*`. Nothing outside the package imports them |
+| SH-A18 | minor | `DEMO_RELATIONSHIP_TYPES` restates the four relationship labels `graph_schema.GRAPH_SCHEMA` already pins | `retrieval_setup.py:33` | Derive from `GRAPH_SCHEMA["relationship_types"]` |
+| SH-A19 | minor | `Neo4jConfig` and `Neo4jCommandConfig` are near-duplicate dataclasses. The duplication is forced by the Lambda's `--no-deps` install, but nothing says so | `hybrid_retrieval.py:80`; `reservation_command.py:94` | Comment that `Neo4jCommandConfig` cannot import from `hybrid_retrieval` because that module pulls in `neo4j-graphrag` |
+| SH-A20 | minor | Two tracked event-promo images, roughly 260 KB, specific to one 2026 conference and referenced by nothing | `images/orlando-codecamp-2026-talk-promo.*` | Delete or ignore |
+| SH-A21 | minor | An ASCII-diagram line reads "lite build takes 30" with the unit lost to the box width, so the number reads as a document count | `workshop-delivery/architecture.md:44` | Reflow to "lite build uses 30 of them" |
+
+### Cross-cutting themes
+
+1. **The same bug fixed in one lab was never swept across the others.** Double-printed
+   agent output was found and fixed in Lab 4 as L4-B1, with an explanatory comment, and
+   still ships in Lab 2 cells 15 and 17 and Lab 3 cells 3, 5, and 12. The rule to adopt
+   is that a fix with a named cause gets grepped tree-wide before it is marked done.
+
+2. **One `MODEL_ID` override, two behaviours.** `BedrockLLM.__init__` defaults to the
+   literal `DEFAULT_MODEL_ID` instead of calling `default_model_id()`, so the documented
+   override applies to Labs 2 through 5 and silently not to Lab 1's 33 extraction calls
+   or to `2.3`. Found independently by the Lab 1 and Lab 2 reviewers. One-line fix at
+   `bedrock_providers.py:150`, and it closes L1-A3 and L2-A10 together.
+
+3. **Counts and inventories in prose drift and nothing checks them.** The stale
+   `20`/`22` test counts were found independently by three reviewers. Module-importer
+   tables, secret counts, cell counts, and concept counts are all hand-maintained
+   numbers that were right when written. SH-A6, one CI job, is the vehicle that closes
+   the whole class.
+
+4. **The workshop asserts more than it shows.** L4-A1, L4-A2, L4-A3, L4-A5, L5-A1,
+   L2-A5, L2-A11, and L1-A15 are the same defect: the sentence on the projector states
+   something the cell below it does not establish, and in L2-A1's case the next cell
+   actively disproves it. For the payoff labs this is the difference between a
+   demonstration and a claim.
+
+5. **The R1 naming sweep stopped at the lab boundary.** Nine "Demo 06" strings survive
+   in `setup/provision_agentcore.py`, one of which is written into every participant's
+   `.env` and four of which become AWS resource Descriptions visible in the console.
+   The `DEMO_*` names in `retrieval_setup.py` are the same omission. None of these
+   touch a frozen identifier.
+
+6. **Retired notebooks are tracked, unmarked, and read as maintained.**
+   `02-retrieval/retrieval_patterns.ipynb`, `04-grounded-write/01_hybrid_retrieval.ipynb`,
+   `05-agentcore-deploy/deploy_agentcore.ipynb`, and
+   `advanced-deployment/02_agentcore_walkthrough.ipynb`. The Lab 4 one sorts first in
+   its folder; the Lab 5 one has the most inviting title in the folder and creates
+   real resources before it dies. A participant scanning a folder cannot tell them
+   from the shipped notebooks.
+
+7. **A value defined twice, with no detection when the two disagree.** SH-A9, SH-A10,
+   and SH-A18 in the package; L5-A17's third and fourth copies of the model id; the
+   guest limit as prose in `CONTRACTS.md`. Each is a two-line fix and doing them as one
+   sweep is cheaper than the separate reviews they will otherwise attract.
+
+8. **The room is treated as one participant.** L5-A2 (fixed singleton AWS names),
+   L6-A2 (instance-wide cleanup handed to everyone), L6-A3 (a Browser query scoped to
+   everyone's runs), SH-A4 (no Bedrock quota guidance for thirty concurrent builds),
+   and SH-A1 (no time budget). Individually minor, together they are the difference
+   between a lab that works alone and a lab that works in a room.
+
+9. **Dependency floors with no ceiling and no lockfile.** `strands-agents>=1.27.0` in
+   four labs, resolving to 1.52.0, on a 1.x line that has already renamed a hook API.
+
+**Nothing in this section has been applied.** Per the standing rule in `CLAUDE.md`, the
+fixes above are proposals to discuss before any of them are made.

@@ -10,19 +10,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence, cast
 
 from neo4j import Driver
 from neo4j_graphrag.indexes import create_fulltext_index, create_vector_index
 
-from workshop.graph_schema import SCHEMA_NODE_LABELS
+from workshop.graph_schema import GRAPH_SCHEMA, SCHEMA_NODE_LABELS
 from workshop.retrieval_contract import (
     CHUNK_FULLTEXT_INDEX,
     CHUNK_VECTOR_INDEX,
     EMBEDDING_DIMENSIONS,
 )
 
-DEMO_CRITICAL_SOURCE_FILES = (
+# The source documents every lab after Lab 1 asks a question against. A build
+# that samples the corpus has to include these or a later lab opens onto a
+# graph that cannot answer its own hero question.
+REQUIRED_SOURCE_FILES = (
     "hotel-paris-001.txt",
     "hotel-paris-002.txt",
     "hotel-cairo-001.txt",
@@ -30,11 +33,15 @@ DEMO_CRITICAL_SOURCE_FILES = (
     "hotel-chicago-001.txt",
 )
 
-DEMO_RELATIONSHIP_TYPES = (
-    "HAS_ROOM",
-    "OFFERS_AMENITY",
-    "HAS_POLICY",
-    "PROVIDES_SERVICE",
+# Derived from the pinned schema rather than restated. The extraction contract
+# in graph_schema is what the build refuses to write outside of, so counting a
+# relationship type this readiness check names but that schema does not pin
+# would report a number the build can never produce.
+SCHEMA_RELATIONSHIP_TYPES = tuple(
+    entry["label"]
+    for entry in cast(
+        Sequence[Mapping[str, str]], GRAPH_SCHEMA["relationship_types"]
+    )
 )
 
 
@@ -52,7 +59,7 @@ class Fixture:
     minimum: int = 1
 
 
-DEMO_CRITICAL_FIXTURES = (
+REQUIRED_FIXTURES = (
     Fixture(
         name="Paris ratings for aggregation",
         query="""
@@ -118,9 +125,9 @@ DEMO_CRITICAL_FIXTURES = (
 
 
 def missing_source_fixtures(paths: Iterable[Path]) -> list[str]:
-    """Return demo-critical source filenames absent from ``paths``."""
+    """Return required source filenames absent from ``paths``."""
     selected = {path.name for path in paths}
-    return sorted(set(DEMO_CRITICAL_SOURCE_FILES) - selected)
+    return sorted(set(REQUIRED_SOURCE_FILES) - selected)
 
 
 def ensure_retrieval_indexes(driver: Driver) -> None:
@@ -147,7 +154,7 @@ def ensure_retrieval_indexes(driver: Driver) -> None:
 
 
 def _index_contract_problems(records: Iterable[Mapping[str, Any]]) -> list[str]:
-    """Return mismatches between SHOW INDEXES records and the demo contract."""
+    """Return mismatches between SHOW INDEXES records and the retrieval contract."""
     indexes = {record["name"]: record for record in records}
     problems: list[str] = []
 
@@ -257,17 +264,17 @@ def graph_counts(driver: Driver) -> tuple[int, int, dict[str, int], dict[str, in
                 RETURN type(r) AS relationship, count(*) AS count
                 ORDER BY relationship
                 """,
-                types=list(DEMO_RELATIONSHIP_TYPES),
+                types=list(SCHEMA_RELATIONSHIP_TYPES),
             )
         }
     return document_count, chunk_count, label_counts, relationship_counts
 
 
 def fixture_problems(driver: Driver) -> list[str]:
-    """Return missing or under-populated demo-critical graph fixtures."""
+    """Return missing or under-populated required graph fixtures."""
     problems: list[str] = []
     with driver.session() as session:
-        for fixture in DEMO_CRITICAL_FIXTURES:
+        for fixture in REQUIRED_FIXTURES:
             record = session.run(fixture.query, **dict(fixture.parameters)).single()
             actual = 0 if record is None else record["actual"]
             if actual < fixture.minimum:

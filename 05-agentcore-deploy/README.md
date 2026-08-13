@@ -57,6 +57,31 @@ The shape of the bill is the thing to understand, and it is not the shape people
 
 **Two teardown paths, because there were two creation paths.** `5.2_teardown.ipynb` removes what the deploy notebook created. `setup/provision_agentcore.py teardown` removes what provisioning created. Run both.
 
+**The Gateway has no authorizer.** `setup/provision_agentcore.py` creates it with `authorizerType="NONE"` to keep the lab to one prerequisite instead of three. That makes the Gateway URL a credential: anyone holding it can call the reservation command and write `ReservationRequest` nodes into your graph, with no sign-in. Keep it out of screen shares and chat, do not commit it, and run both teardowns when you are done, which is what makes the URL stop existing. [`advanced-deployment/DEPLOYMENT.md`](advanced-deployment/DEPLOYMENT.md) describes the authorizer a production deployment adds.
+
+### Many participants, one account
+
+**Every name this lab creates comes from one prefix, which defaults to `demo06`.** That is fine when each participant has their own AWS account, which is the shape a Workshop Studio event usually hands out. It is not fine when a room shares an account: everyone provisions the same Gateway, Lambda, secret and roles, everyone launches a Runtime under the same name, and `launch(auto_update_on_conflict=True)` overwrites rather than complaining. The first teardown then deletes the whole room's work.
+
+Give each participant a unique prefix and the collision goes away:
+
+```bash
+export DEMO06_PREFIX=demo06-yourname
+```
+
+Export it before `setup/provision_agentcore.py provision`, before opening `5.1_agentcore_deploy.ipynb`, and again before either teardown. Everything downstream follows from it:
+
+| Derived from the prefix | Default | With `DEMO06_PREFIX=demo06-alice` |
+|---|---|---|
+| Resource-name prefix and owner tag key | `demo06`, `demo06-agentcore=true` | `demo06-alice`, `demo06-alice-agentcore=true` |
+| Gateway target, and half the MCP tool name | `demo06-reservation-request` | `demo06-alice-reservation-request` |
+| AgentCore Runtime | `HotelBookingAgent` | `HotelBookingAgentDemo06Alice` |
+| ECR repository and CodeBuild project | `bedrock-agentcore-hotelbookingagent` and its `-builder` | the same, from the longer Runtime name |
+
+`5.1` passes the target name into the container as `GATEWAY_TARGET_NAME` beside `GATEWAY_URL`, because `booking_agent.py` builds the MCP tool name from it and refuses to run against a Gateway publishing anything else. Runtime names allow letters, digits and underscores only, so the prefix is folded into CamelCase and capped at 48 characters; `5.1` fails immediately with the length rather than in a CodeBuild log five minutes later.
+
+**A wrong prefix at teardown is the failure mode to know about.** Both teardowns derive their names the same way, so on a prefix that does not match what you provisioned they find nothing, report everything absent, and exit clean while your resources keep billing. Export the same value you deployed with.
+
 **The Neo4j database is terminated separately.** Neo4j Aura is not an AWS resource in your account, so nothing in this folder can reach it. Delete the instance from the Aura console when you are finished. The cleanup path here is AWS-only on purpose: deleting graph records from a database that is about to be dropped wholesale adds failure modes without reclaiming anything.
 
 ---
@@ -73,7 +98,7 @@ The shape of the bill is the thing to understand, and it is not the shape people
 
 `5.3` is optional and depends on `5.1`. It reads `AGENT_RUNTIME_ARN`, the value `5.1` produces at launch. Provisioning does not write that key, because provisioning does not know the ARN: only a launch produces one. `5.1` writes it into the repository-root `.env` itself, with the same in-place upsert `setup/provision_agentcore.py` uses for its three keys, so `5.3` finds it in a fresh kernel with nothing to copy by hand. It also prints the `export` line if you would rather set it in a shell. If neither has happened, every live cell in `5.3` skips.
 
-Run them in order from this directory:
+The order to run them is `5.1`, then `5.3` if you want it, then `5.2` last. The table above is numbered, not sequenced: `5.2` deletes the Runtime that `5.3` invokes, so teardown goes at the end whether or not you take the optional walkthrough. Start here, from this directory:
 
 ```bash
 code 5.1_agentcore_deploy.ipynb
@@ -85,7 +110,9 @@ code 5.1_agentcore_deploy.ipynb
 
 ### The two reference sources being retargeted
 
-`deploy_agentcore.ipynb` is present in this folder as the **source material for authoring `5.1`**, not as a participant path. It targets the earlier module layout: DynamoDB hotel, booking, and steering-rule tables, its own IAM roles, seven booking-lifecycle Lambdas, and its own Gateway creation. Two parts of it carry over unchanged: step 8, which calls `Runtime.configure` and `Runtime.launch` from `bedrock_agentcore_starter_toolkit`, and the tagging cell that follows it. Do not run it as written.
+`deploy_agentcore.ipynb` is present in this folder as the **source material for authoring `5.1`**, not as a participant path, and it opens with a banner saying so. It targets the earlier module layout: DynamoDB hotel, booking, and steering-rule tables, its own IAM roles, seven booking-lifecycle Lambdas, and its own Gateway creation. Two parts of it carry over unchanged: step 8, which calls `Runtime.configure` and `Runtime.launch` from `bedrock_agentcore_starter_toolkit`, and the tagging cell that follows it.
+
+**Do not run it.** It references a `query_knowledge_graph` Lambda that no longer exists, so it fails partway through with billable resources already created, and it points at an `08-cleanup/` folder that is gone. Nothing it creates carries the `WorkshopResource` tag, so `5.2_teardown.ipynb` will not clean up after it.
 
 `advanced-deployment/02_agentcore_walkthrough.ipynb` is the source material for `5.3`. See [`advanced-deployment/README.md`](advanced-deployment/README.md).
 
@@ -123,7 +150,7 @@ caller (prompt + request_id)
                  -> create_reservation_request Lambda -> Neo4j Aura   (rule check + idempotent write)
 ```
 
-The Gateway exposes exactly one tool, named `demo06-reservation-request___create_reservation_request`. `booking_agent.py` calls `list_tools_sync()` at startup and raises if the discovered tool list is anything other than that single name, so a Gateway that has grown an extra target fails loudly instead of handing the model a wider surface.
+The Gateway exposes exactly one tool, named `demo06-reservation-request___create_reservation_request` on the default prefix: the Gateway target name and the schema tool name joined by three underscores. `booking_agent.py` builds that name from the `GATEWAY_TARGET_NAME` the launch passes in, calls `list_tools_sync()` at startup, and raises if the discovered tool list is anything other than that single name, so a Gateway that has grown an extra target fails loudly instead of handing the model a wider surface.
 
 ---
 
@@ -133,8 +160,8 @@ The Gateway exposes exactly one tool, named `demo06-reservation-request___create
 - **[Python](https://python.org/downloads) 3.12+.** That is the floor `requirements.txt` installs: its first line is `-e ../workshop`, and `workshop/pyproject.toml` declares `requires-python = ">=3.12"`. `workshop_cleanup.py` also uses `enum.StrEnum`, which is 3.11 and later, so the script alone cannot run below 3.11 even if you install it without the package.
 - **[uv](https://docs.astral.sh/uv/)** package manager.
 - **AWS credentials** allowed to create Secrets Manager secrets, IAM roles, Lambda functions, and `bedrock-agentcore-control` resources. The region resolves from `AWS_REGION`, then `AWS_DEFAULT_REGION`, then defaults to `us-east-1`.
-- **Amazon Bedrock model access.** The Runtime role authorizes `us.anthropic.claude-sonnet-5` by default. Override it with the `MODEL_ID` environment variable.
-- **Neo4j values in the repo-root `.env`:** `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`. Provisioning refuses to run without all four, because they become the command secret.
+- **Amazon Bedrock model access.** The deployed agent runs on `us.anthropic.claude-sonnet-5`, the one model id the whole workshop uses, defined in `workshop.bedrock_providers` and overridable with the `MODEL_ID` environment variable, which `5.1` forwards into the container. Enable that model in your region's Bedrock console before deploying. The Runtime role itself grants `bedrock:InvokeModel` on foundation models generally rather than on one model id, so a `MODEL_ID` override needs no IAM change.
+- **Neo4j values in the repo-root `.env`:** `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`. `NEO4J_DATABASE` is optional and defaults to `neo4j`. Provisioning refuses to run without the first three, because they become the command secret.
 
 Install this lab's dependencies:
 
@@ -184,7 +211,7 @@ The Lambda runs on `python3.12`, `arm64`, with a 30-second timeout and 256 MB of
 
 ### The `.env` handoff
 
-`provision` writes three identifiers into a managed block in the repo-root `.env`, and `teardown` comments them back out. Never set these by hand:
+`provision` writes three identifiers into a managed block in the repo-root `.env`, and `teardown` removes them along with the block's header line, so nothing stale is left pointing at AWS. Never set these by hand:
 
 | Key | Meaning |
 |---|---|
@@ -223,7 +250,12 @@ agent_runtime.configure(
 )
 result = agent_runtime.launch(
     auto_update_on_conflict=True,
-    env_vars={"AWS_REGION": REGION, "GATEWAY_URL": GATEWAY_URL, ...},
+    env_vars={
+        "AWS_REGION": REGION,
+        "GATEWAY_URL": GATEWAY_URL,
+        "GATEWAY_TARGET_NAME": GATEWAY_TARGET_NAME,
+        ...,
+    },
 )
 ```
 
@@ -231,7 +263,7 @@ Both filenames are bare, not folder-prefixed, and that follows from the `chdir`.
 
 `configure` writes a `.bedrock_agentcore.yaml` file into `deployment-tools/`, beside the entrypoint, holding the runtime ID from that deploy. `5.1` deletes any existing one as pre-flight, because a stale ID makes the next run try to update a Runtime teardown already deleted. `launch` builds the ARM64 image in CodeBuild, creates the ECR repository, pushes the image, and creates the Runtime. Budget three to five minutes for the launch. `result.agent_arn` is the value `5.3` needs as `AGENT_RUNTIME_ARN`, and `5.1` writes it into the repository-root `.env` rather than only printing it.
 
-`GATEWAY_URL` is required. `booking_agent.py` raises `GATEWAY_URL is required for the deployed Runtime` when it is absent, rather than starting up with no command tool.
+`GATEWAY_URL` is required. `booking_agent.py` raises `GATEWAY_URL is required for the deployed Runtime` when it is absent, rather than starting up with no command tool. `GATEWAY_TARGET_NAME` is what makes a per-participant prefix work; leave it out and the container falls back to `demo06-reservation-request` and fails Gateway discovery on every invocation.
 
 ## Step 3: Tag what the toolkit created
 
@@ -250,6 +282,8 @@ Each is addressed by exact name or by ARN. Nothing is enumerated and nothing is 
 `5.3_agentcore_walkthrough.ipynb` invokes the deployed Runtime and follows a single request through every layer.
 
 The caller creates a canonical UUID and passes it as `request_id` alongside the prompt. The Runtime passes that exact value to the Gateway command. `ReservationRequestGuard`, a Strands `BeforeToolCallEvent` hook in `booking_agent.py`, cancels the tool call with a `BLOCKED:` message if the model omits the request ID or substitutes one of its own. The same ID appears in Runtime logs, Lambda logs, AgentCore traces, and on the stored `ReservationRequest` node in Neo4j, so one CloudWatch Logs Insights search on `request_id=` recovers the whole path.
+
+Every invocation returns four keys, and the fourth is the one worth reading. `response` is the model's prose, `tools_used` lists the tools it attempted, `request_id` echoes what the caller sent, and `command_result` is the reservation command's own response: the `status`, `reason_code`, and `duplicate` that `workshop.reservation_command` computed inside the Lambda after reading the rule out of the graph. A second Strands hook, `CommandResultRecorder`, carries it out of the container on `AfterToolCallEvent`. It matters because `tools_used` records an attempt: a call the guard cancelled, a Lambda that failed on auth, and a Gateway 5xx all put the command's name in that list and all leave the graph empty, which is exactly what a genuine rule rejection also looks like. `command_result` is what tells them apart, and it is `null` when the command was never reached, which is why `5.1`'s third smoke test asserts on its `reason_code`.
 
 Logs record the request ID and never prompts, credentials, secret payloads, or connection strings.
 
@@ -325,7 +359,7 @@ uv run --with pytest --with-requirements requirements.txt -m pytest
 
 **20 in `test_workshop_cleanup.py`.** Every AWS client is an injected fake. The headline test is `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape the original incident damaged and asserts none of those roles is selected. `test_dry_run_issues_no_mutating_calls` pins the dry run to read-only calls, and `test_resource_in_use_is_retried_and_never_reported_deleted` pins the poll-to-absence behavior.
 
-**9 in `deployment-tools/test_runtime_integration.py`.** These pin the Runtime and Gateway boundary offline: that the Gateway fails closed when it discovers anything other than the one reservation command, that the hook refuses a reservation call whose `request_id` is not the caller's, that the deployed read path touches only the read secret, and that the image excludes the Lambda and the legacy notebooks. They run locally because `requirements.txt` declares `bedrock-agentcore` and `mcp` for exactly this reason.
+**9 in `deployment-tools/test_runtime_integration.py`.** These pin the Runtime and Gateway boundary offline: that the Gateway fails closed when it discovers anything other than the one reservation command, that the hooks refuse a reservation call whose `request_id` is not the caller's and record the command's verdict without reshaping a broken call into something that reads like a rule rejection, that the deployed read path touches only the read secret, and that the image excludes the Lambda and the legacy notebooks. They run locally because `requirements.txt` declares `bedrock-agentcore` and `mcp` for exactly this reason.
 
 ---
 
@@ -337,13 +371,14 @@ uv run --with pytest --with-requirements requirements.txt -m pytest
 ├── 5.1_agentcore_deploy.ipynb      # Build the wheel, launch the Runtime, tag it, four smoke tests
 ├── 5.2_teardown.ipynb              # Tag-scoped teardown, dry run first
 ├── 5.3_agentcore_walkthrough.ipynb # Optional: one request correlated end to end
-├── deploy_agentcore.ipynb          # Reference source for authoring 5.1, not a participant path
+├── deploy_agentcore.ipynb          # Superseded, banner says so. Reference source for authoring 5.1, never run
 ├── workshop_cleanup.py             # The one teardown implementation
 ├── test_workshop_cleanup.py        # 20 tests, fakes injected, no AWS needed
 ├── CLEANUP.md                      # Long-form teardown reasoning and incident history
 ├── requirements.txt                # Starter toolkit, Strands, and -e ../workshop
 ├── tool_schemas/
-│   └── tools.json                  # Tool definitions
+│   └── tools.json                  # Read only by Lab 4's test_contracts.py. The Gateway
+│                                   #   reads deployment-tools/gateway_target.json instead
 ├── deployment-tools/               # The deployable source, and the container build context
 │   ├── booking_agent.py            # Runtime entry point: in-process retrieval + one Gateway command
 │   ├── Dockerfile, .dockerignore   # Runtime container image
@@ -364,6 +399,8 @@ Read `CLEANUP.md` for the reasoning behind the tag gate and for the incident his
 
 The notebook registry in `setup/run_notebooks.py` already lists all three Lab 5 notebooks with their gates: `5.1_agentcore_deploy.ipynb` and `5.3_agentcore_walkthrough.ipynb` carry `deploys_resources=True`, and `5.2_teardown.ipynb` carries `deletes_resources=True`. That is why teardown is its own notebook rather than a closing section: the gate is a `NotebookSpec` field, and a section cannot hold one.
 
+The registry lists them in run order, `5.1`, `5.3`, `5.2`, rather than by number, so passing both flags at once deploys, walks through, and then tears down. Registered by number, the pair would tear the Runtime down and then run the walkthrough against a deleted ARN.
+
 Both gated commands create or delete real, billable AWS resources, and both need a provisioned account to pass:
 
 ```bash
@@ -381,9 +418,9 @@ Without those flags, Lab 5 is skipped, which is how the default `uv run setup/ru
 
 **`GATEWAY_URL is required for the deployed Runtime`.** The `env_vars` argument to `launch` did not include `GATEWAY_URL`. Take the value from `AGENTCORE_GATEWAY_URL` in the repo-root `.env`.
 
-**`Gateway must expose only demo06-reservation-request___create_reservation_request`.** The Gateway has more than one target, or its single target was created from something other than `deployment-tools/gateway_target.json`. `booking_agent.py` raises rather than handing the model a wider tool surface. Run `uv run setup/provision_agentcore.py status` to see which targets exist.
+**`Gateway must expose only demo06-reservation-request___create_reservation_request`.** Three causes, in the order worth checking. The Gateway has more than one target. Its single target was created from something other than `deployment-tools/gateway_target.json`. Or you provisioned under a `DEMO06_PREFIX` and the launch did not pass the matching `GATEWAY_TARGET_NAME`, so the container is looking for the default name and the Gateway is publishing yours; the error message names what it wanted and lists what it found, so the two spellings are visible side by side. `booking_agent.py` raises rather than handing the model a wider tool surface. Run `uv run setup/provision_agentcore.py status` to see which targets exist.
 
-**The `.env` identifiers from provisioning are missing.** `AGENTCORE_GATEWAY_URL`, `AGENTCORE_RUNTIME_ROLE_ARN`, and `NEO4J_COMMAND_SECRET_ID` are written by `provision` and cleared by `teardown`, never set by hand. Run `uv run setup/provision_agentcore.py status` from the repository root to see what exists, then re-run `provision`, which is idempotent and rewrites the managed block. If `provision` refuses to start, one of `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, or `NEO4J_DATABASE` is missing from the repo-root `.env`; those four values become the command secret. `AGENT_RUNTIME_ARN` is a separate case: provisioning never writes it, `5.1` produces it at launch, and `5.3` needs it set.
+**The `.env` identifiers from provisioning are missing.** `AGENTCORE_GATEWAY_URL`, `AGENTCORE_RUNTIME_ROLE_ARN`, and `NEO4J_COMMAND_SECRET_ID` are written by `provision` and cleared by `teardown`, never set by hand. Run `uv run setup/provision_agentcore.py status` from the repository root to see what exists, then re-run `provision`, which is idempotent and rewrites the managed block. If `provision` refuses to start, one of `NEO4J_URI`, `NEO4J_USERNAME`, or `NEO4J_PASSWORD` is missing from the repo-root `.env`; those three plus `NEO4J_DATABASE`, which defaults to `neo4j`, become the command secret. `AGENT_RUNTIME_ARN` is a separate case: provisioning never writes it, `5.1` produces it at launch, and `5.3` needs it set.
 
 **Resources are left behind after teardown.** Read the exit output rather than assuming. Anything listed under `UNTAGGED_BLOCKED` exists but carries no workshop tag, which usually means the tagging step in `5.1` was skipped or a partial launch created a resource before tagging ran. Two ways to clear the block, and both start with confirming the resource is yours:
 

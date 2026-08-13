@@ -58,8 +58,17 @@ maximum-guests rejection also contains `max_guests`.
 
 Only a hotel with a stable ID from the committed fixture manifest at
 `workshop/src/workshop/fixtures/hotel_ids.json` can be selected. Check-in cannot
-be in the past, check-out must be after check-in, and the enabled Neo4j rule
-limits the request to 10 guests.
+be in the past, and check-out must be after check-in.
+
+The guest ceiling is not stated here, on purpose. It is the `max_guests`
+property of the enabled `Rule` node whose `rule_id` is
+`contracts.MAX_GUESTS_RULE_ID`, read inside the same transaction as the write.
+Restating the number in this document would create a second copy of it, which is
+the exact failure Lab 4 exists to remove. Read the value from the graph, or from
+`contracts.MAX_GUESTS`, which the graph is seeded from and which the graph
+overrides when the two disagree. A request above that value is rejected with
+`max_guests_exceeded`, and the rejection carries the rule's `max_guests` so a
+caller never has to hardcode it either.
 
 An accepted request persists `status=accepted` and a Neo4j-generated
 `created_at` timestamp. The response returns that timestamp. A repeat delivery

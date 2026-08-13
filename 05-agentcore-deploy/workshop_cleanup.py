@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from collections.abc import Iterator
@@ -97,8 +98,25 @@ ROLE_NAMES = [LAMBDA_ROLE_NAME, AGENTCORE_ROLE_NAME]
 # `demo06-gateway`, created and deleted by setup/provision_agentcore.py.
 GATEWAY_NAME = "HotelBookingGateway"
 # Live: the name 5.1_agentcore_deploy.ipynb launches under. Both files have to
-# agree on it, or teardown cannot find what the deploy created.
-RUNTIME_NAME = "HotelBookingAgent"
+# agree on it, or teardown cannot find what the deploy created, which is why it
+# is derived here the same way rather than written out.
+#
+# `demo06` is the default prefix and the one almost every run uses. A
+# facilitator handing each participant their own DEMO06_PREFIX so they can share
+# one AWS account has to export the same value before running this teardown; on
+# the wrong prefix this file looks for a Runtime nobody launched and reports it
+# ABSENT. The default name is deliberately not added to the list in that case:
+# on a shared account it would name somebody else's Runtime, and that one is
+# tagged, so it would be deleted.
+DEMO06_PREFIX = os.environ.get("DEMO06_PREFIX", "").strip() or "demo06"
+RUNTIME_SUFFIX = (
+    ""
+    if DEMO06_PREFIX == "demo06"
+    else "".join(
+        part.capitalize() for part in re.split(r"[^A-Za-z0-9]+", DEMO06_PREFIX) if part
+    )
+)
+RUNTIME_NAME = f"HotelBookingAgent{RUNTIME_SUFFIX}"
 # Legacy: a second Runtime from the earlier memory module.
 MEMORY_RUNTIME_NAME = "HotelBookingAgentWithMemory"
 RUNTIME_NAMES = [RUNTIME_NAME, MEMORY_RUNTIME_NAME]

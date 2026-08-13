@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Memory client construction for the inspectable Neo4j memory demo.
+"""Memory client construction for the inspectable Neo4j memory lab.
 
 Builds a ``neo4j-agent-memory`` :class:`MemoryClient` over the same Aura
-instance as the hotel knowledge graph, so memory nodes (``Conversation``,
-``Message``, ``Preference``, ``User``) land beside the domain nodes where
+instance as the hotel knowledge graph, so the memory nodes ``Conversation``,
+``Message``, ``Preference``, and ``User`` land beside the domain nodes where
 they can be inspected with plain Cypher.
 
 The construction pattern is adapted from a different, earlier GraphRAG
@@ -26,7 +26,7 @@ repository's Lab 5) and solves the same non-obvious problems:
   is read from ``NEO4J_DATABASE`` so instances whose single database is not
   named ``neo4j`` still work.
 
-Two choices are specific to this demo:
+Two choices are specific to this lab:
 
 - **Titan Text Embeddings V2, not Nova:** the library's Bedrock embedder
   supports Titan and Cohere request formats only. The memory layer owns its
@@ -35,7 +35,7 @@ Two choices are specific to this demo:
   pinned Nova chunk embeddings, not a conflict.
 - **Multi-tenant mode is on:** every memory write must carry a
   ``user_identifier``, and the store raises ``ValueError`` for any write that
-  omits one. That makes the demo's actor-isolation lesson structural rather
+  omits one. That makes the lab's actor-isolation lesson structural rather
   than conventional.
 
 No credentials are read and no connection is opened at import time; both
@@ -63,6 +63,7 @@ from neo4j_agent_memory import (
     MemorySettings,
 )
 from neo4j_agent_memory import Neo4jConfig as MemoryNeo4jConfig
+from neo4j_agent_memory.core.exceptions import EmbeddingError
 from neo4j_agent_memory.embeddings.bedrock import BedrockEmbedder
 from pydantic import SecretStr
 
@@ -84,29 +85,58 @@ from workshop.graph_setup import HERO_NAME as HERO_HOTEL_NAME
 MEMORY_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 MEMORY_EMBEDDING_DIMENSIONS = 1024
 
-# The library-managed vector indexes this demo exercises
+# The library-managed vector indexes this lab exercises
 # (SchemaManager._MANAGED_VECTOR_INDEXES). The smoke test verifies these
 # exist with MEMORY_EMBEDDING_DIMENSIONS after the first connect.
 MEMORY_VECTOR_INDEXES = ("message_embedding_idx", "preference_embedding_idx")
 
-# Workshop ownership marker for the memory records this demo writes, following
-# Lab 4's convention (contracts.WORKSHOP_OWNER = "neo4j-ftw-demo-6").
+# Workshop ownership marker for the memory records this lab writes, following
+# Lab 4's convention, whose contracts.WORKSHOP_OWNER is "neo4j-ftw-demo-6".
 # cleanup_memory.py deletes only records carrying this marker, so cleanup can
-# never reach the hotel graph or another module's data.
+# never reach the hotel graph or another lab's data.
 WORKSHOP_OWNER = "neo4j-ftw-demo-8"
 
 # Every session id and user identifier the scenario notebook writes starts
 # with this prefix. The digits are 08 because this lab was Demo 08 before the
-# renumber; the value is arbitrary and only its stability matters. Cleanup
-# sweeps the prefix as well as the ownership marker, so records from a run
-# that failed before the tagging step are still removed.
+# renumber to six labs; the value is frozen, arbitrary, and only its stability
+# matters. Cleanup sweeps the prefix as well as the ownership marker, so
+# records from a run that failed before the tagging step are still removed.
 DEMO_ID_PREFIX = "demo08-"
 
-# Preferences carry no session id or identifier, so the namespace has to live
-# somewhere on the node itself. Every preference this lab writes puts it in
-# ``category``, which gives cleanup a prefix handle on a preference whose run
-# died before the tagging cell.
-PREFERENCE_CATEGORY_PREFIX = f"hotels-{DEMO_ID_PREFIX}"
+
+def preference_category_prefix(id_prefix: str = DEMO_ID_PREFIX) -> str:
+    """Map an id namespace onto the matching preference category namespace.
+
+    Preferences carry no session id or identifier, so the namespace has to
+    live somewhere on the node itself. Every preference this lab writes puts
+    it in ``category``, which gives cleanup a prefix handle on a preference
+    whose run died before the tagging cell. Passing a run prefix rather than
+    the default returns the category namespace for that one run.
+    """
+    return f"hotels-{id_prefix}"
+
+
+PREFERENCE_CATEGORY_PREFIX = preference_category_prefix()
+
+
+def preference_category(run_prefix: str, actor_label: str) -> str:
+    """Build one actor's preference category inside one run's namespace.
+
+    Each actor gets a category of their own, and that is load-bearing rather
+    than tidy. ``LongTermMemory.add_preference`` deduplicates: it runs
+    ``FIND_DUPLICATE_PREFERENCES`` at cosine 0.95 filtered to ``node.category
+    = $category`` and, on a hit, returns the existing ``Preference`` and links
+    the calling user to it. Two actors writing near-paraphrases about the same
+    hotel under one category would therefore end up sharing a single node, and
+    the second actor would read back the first actor's text. Distinct
+    categories put them outside each other's deduplication scope, so the
+    isolation the lab teaches is the isolation the lab demonstrates.
+
+    Both categories still start with ``preference_category_prefix(run_prefix)``,
+    so run-scoped cleanup finds them with one prefix.
+    """
+    return f"{preference_category_prefix(run_prefix)}{actor_label}"
+
 
 # Preference-to-message provenance is one explicit workshop-owned
 # relationship, because the library links extracted entities to their source
@@ -135,7 +165,7 @@ logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 @dataclass(frozen=True)
 class MemoryDemoConfig:
-    """Connection and model settings for the memory demo."""
+    """Connection and model settings for the memory lab."""
 
     uri: str
     username: str
@@ -145,10 +175,10 @@ class MemoryDemoConfig:
 
 
 def load_config() -> MemoryDemoConfig:
-    """Read the demo configuration from the environment or a ``.env`` file.
+    """Read the lab configuration from the environment or a ``.env`` file.
 
     Reads the same NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD settings the
-    other demos use, checking this demo's ``.env`` and then the repository
+    other labs use, checking this lab's ``.env`` and then the repository
     root ``.env``. Values already present in the environment win.
 
     Raises:
@@ -175,7 +205,7 @@ def build_memory_settings(config: MemoryDemoConfig) -> MemorySettings:
 
     Embedding-only configuration: Titan V2 supplies the vectors, no LLM is
     constructed, and entity extraction is off (``ExtractorType.NONE``). The
-    demo writes memory explicitly, so nothing needs a model to extract
+    lab writes memory explicitly, so nothing needs a model to extract
     entities from text. ``multi_tenant=True`` makes every write require a
     ``user_identifier``, which is what turns the actor-isolation lesson from a
     convention into an enforced one.
@@ -224,6 +254,41 @@ def build_memory_embedder(config: MemoryDemoConfig) -> BedrockEmbedder:
         model=MEMORY_EMBEDDING_MODEL,
         region_name=config.region,
     )
+
+
+TITAN_ACCESS_HINT = (
+    f"Enable {MEMORY_EMBEDDING_MODEL} in the Bedrock Model Access console at "
+    "https://console.aws.amazon.com/bedrock/home#/modelaccess for the region "
+    "AWS_REGION names, then re-run this cell. This is a different model from "
+    "the Nova embeddings Lab 1 uses, so Lab 1 succeeding proves nothing about "
+    "Titan access."
+)
+
+
+async def titan_access_problem(config: MemoryDemoConfig) -> str | None:
+    """Return a named cause when Titan V2 cannot be invoked, else ``None``.
+
+    Every memory write embeds its text, so an unenabled model surfaces as a
+    raw ``AccessDeniedException`` from inside the library at the first
+    ``add_message``. One short embed call up front turns that into a named
+    cause with a fix attached, at the point the participant can still act on
+    it. The probe costs one Titan call and writes nothing.
+    """
+    embedder = build_memory_embedder(config)
+    try:
+        vector = await embedder.embed("Titan readiness probe.")
+    except EmbeddingError as exc:
+        return (
+            f"Bedrock could not embed with {MEMORY_EMBEDDING_MODEL} in "
+            f"{config.region}: {exc}. {TITAN_ACCESS_HINT}"
+        )
+    if len(vector) != MEMORY_EMBEDDING_DIMENSIONS:
+        return (
+            f"{MEMORY_EMBEDDING_MODEL} returned {len(vector)} dimensions in "
+            f"{config.region}, and the memory vector indexes are built for "
+            f"{MEMORY_EMBEDDING_DIMENSIONS}."
+        )
+    return None
 
 
 def build_memory_client(config: MemoryDemoConfig | None = None) -> MemoryClient:
@@ -335,7 +400,7 @@ def get_actor_preferences_for_hotel(
 ) -> list[dict]:
     """Return preferences owned by one actor and linked to one Hotel.
 
-    This actor-anchored graph read is the demo's authorization-aware recall
+    This actor-anchored graph read is the lab's authorization-aware recall
     path. The library's vector search is intentionally not used because it is
     store-wide in 0.5.0.
     """
@@ -354,7 +419,7 @@ def tag_demo_records(
     user_identifiers: Sequence[str],
     driver: Driver | None = None,
 ) -> int:
-    """Stamp the demo's memory records with the workshop ownership marker.
+    """Stamp this lab's memory records with the workshop ownership marker.
 
     Sets ``workshop_owner`` on the conversations and messages of the given
     sessions, on the given users, and on the preferences those users own.

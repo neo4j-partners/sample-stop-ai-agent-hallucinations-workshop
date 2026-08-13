@@ -5,10 +5,13 @@
 Pins the configuration contract this lab depends on: Titan Text Embeddings V2
 with 1024 dimensions, an explicit Bedrock embedder, an explicit target
 database, extraction off, and multi-tenant enforcement on. Also covers the
-workshop-owned write helpers (provenance edge, ownership marker) against a
-fake driver, the scoping guarantees of the cleanup Cypher, and the hotel-count
-guard that makes cleanup refuse to finish if the hotel graph moved. The live
-connect, write, and index checks are exercised by ``smoke_test.py``, not here.
+workshop-owned write helpers, meaning the provenance edge and the ownership
+marker, against a fake driver, the per-actor preference categories that keep
+the library's deduplication from merging two actors' preferences, the scoping
+guarantees of the cleanup Cypher, the scope the cleanup command line resolves
+to, and the hotel-count guard that makes cleanup refuse to finish if the hotel
+graph moved. The live connect, write, and index checks are exercised by
+``smoke_test.py``, not here.
 
 Run with:  uv run --with pytest --with-requirements requirements.txt -m pytest
 """
@@ -42,8 +45,12 @@ from memory_helpers import (
     get_actor_preferences_for_hotel,
     link_preference_to_message_and_hotel,
     load_config,
+    preference_category,
+    preference_category_prefix,
     tag_demo_records,
 )
+
+RUN_PREFIX = f"{DEMO_ID_PREFIX}a1b2c3d4-"
 
 CONFIG = MemoryDemoConfig(
     uri="neo4j+s://example.databases.neo4j.io",
@@ -62,7 +69,7 @@ class TestLoadConfig(unittest.TestCase):
         # .env files cannot leak into these assertions.
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        empty_dir = Path(tmp.name) / "demo"
+        empty_dir = Path(tmp.name) / "lab"
         empty_dir.mkdir()
         patcher = mock.patch.object(memory_helpers, "_DEMO_DIR", empty_dir)
         patcher.start()
@@ -84,7 +91,7 @@ class TestLoadConfig(unittest.TestCase):
         self.assertEqual(config.database, "hotels")
         self.assertEqual(config.region, "us-west-2")
 
-    def test_defaults_match_the_other_demos(self) -> None:
+    def test_defaults_match_the_other_labs(self) -> None:
         with mock.patch.dict(
             "os.environ", {"NEO4J_PASSWORD": "pw"}, clear=True
         ):
@@ -287,7 +294,7 @@ class TestActorScopedPreferenceRead(unittest.TestCase):
 
 
 class TestTagDemoRecords(unittest.TestCase):
-    """The ownership marker write scopes to the demo's sessions and users."""
+    """The ownership marker write scopes to the lab's sessions and users."""
 
     def test_marks_and_counts_records(self) -> None:
         driver = FakeDriver([{"marked": 7}])
@@ -343,11 +350,15 @@ class FakeCleanupResult:
         return FakeSummary(self._counters)
 
 
+COUNT_QUERIES = frozenset(count_query for _, _, count_query in cleanup_memory.SWEEPS)
+
+
 class FakeCleanupSession:
     """Answer COUNT_HOTELS from a scripted list, count deletes for the rest.
 
     cleanup_memory calls ``session.run(COUNT_HOTELS)`` with no parameters and
     ``session.run(query, params)`` for the sweeps, so both shapes are handled.
+    A dry run asks the per-sweep count queries for a ``records`` row instead.
     """
 
     def __init__(self, hotel_counts: list[int]) -> None:
@@ -364,7 +375,12 @@ class FakeCleanupSession:
         self.calls.append((query, parameters or {}))
         if query == cleanup_memory.COUNT_HOTELS:
             return FakeCleanupResult(row={"hotels": self.hotel_counts.pop(0)})
+        if query in COUNT_QUERIES:
+            return FakeCleanupResult(row={"records": 3})
         return FakeCleanupResult(counters=FakeCounters(nodes=1, relationships=2))
+
+    def queries(self) -> list[str]:
+        return [query for query, _ in self.calls]
 
 
 class FakeCleanupDriver:
@@ -393,7 +409,12 @@ class TestCleanupHotelGuard(unittest.TestCase):
         with mock.patch.object(
             cleanup_memory.GraphDatabase, "driver", return_value=driver
         ):
-            self.assertEqual(cleanup_memory.run_cleanup(CONFIG), 0)
+            self.assertEqual(
+                cleanup_memory.run_cleanup(
+                    CONFIG, cleanup_memory.run_scope(RUN_PREFIX)
+                ),
+                0,
+            )
         self.assertTrue(driver.closed)
         self.assertEqual(driver.database, CONFIG.database)
 
@@ -403,7 +424,9 @@ class TestCleanupHotelGuard(unittest.TestCase):
             cleanup_memory.GraphDatabase, "driver", return_value=driver
         ):
             with self.assertRaises(AssertionError) as ctx:
-                cleanup_memory.run_cleanup(CONFIG)
+                cleanup_memory.run_cleanup(
+                    CONFIG, cleanup_memory.run_scope(RUN_PREFIX)
+                )
         message = str(ctx.exception)
         self.assertIn("12", message)
         self.assertIn("11", message)
@@ -418,18 +441,22 @@ class TestCleanupHotelGuard(unittest.TestCase):
             with mock.patch.object(
                 cleanup_memory.GraphDatabase, "driver", return_value=driver
             ):
-                self.assertEqual(cleanup_memory.main(), 1)
+                exit_code = cleanup_memory.main(["--run-prefix", RUN_PREFIX])
+        self.assertEqual(exit_code, 1)
 
 
 class TestCleanupScoping(unittest.TestCase):
-    """The cleanup Cypher can only ever touch demo-owned memory records."""
+    """The cleanup Cypher can only ever touch this lab's memory records."""
 
-    def test_hotel_link_delete_requires_owner(self) -> None:
+    def test_hotel_link_delete_requires_owner_and_category(self) -> None:
         query = cleanup_memory.DELETE_DEMO_HOTEL_LINKS
         self.assertIn(HOTEL_RELATIONSHIP, query)
         self.assertIn("r.workshop_owner = $owner", query)
+        # Without the category bound, one participant's cleanup would strip
+        # the provenance edges every other participant just wrote.
+        self.assertIn("p.category STARTS WITH $category_prefix", query)
 
-    def test_prefix_sweeps_use_the_demo_namespace(self) -> None:
+    def test_prefix_sweeps_use_the_lab_namespace(self) -> None:
         self.assertIn("STARTS WITH $prefix", cleanup_memory.DELETE_PREFIXED_SESSIONS)
         self.assertIn("STARTS WITH $prefix", cleanup_memory.DELETE_PREFIXED_USERS)
         self.assertEqual(DEMO_ID_PREFIX, "demo08-")
@@ -462,7 +489,7 @@ class TestCleanupScoping(unittest.TestCase):
         with mock.patch.object(
             cleanup_memory.GraphDatabase, "driver", return_value=driver
         ):
-            cleanup_memory.run_cleanup(CONFIG)
+            cleanup_memory.run_cleanup(CONFIG, cleanup_memory.all_runs_scope())
         params = dict(driver.session_obj.calls)[
             cleanup_memory.DELETE_ORPHANED_DEMO_PREFERENCES
         ]
@@ -482,6 +509,137 @@ class TestCleanupScoping(unittest.TestCase):
         for query in queries:
             self.assertNotIn("REMOVE h:", query)
             self.assertNotIn("DELETE h", query)
+
+
+class TestPreferenceCategories(unittest.TestCase):
+    """Two actors have to write under two categories, not one.
+
+    ``LongTermMemory.add_preference`` deduplicates inside a category: it runs a
+    vector search over ``preference_embedding_idx`` filtered to
+    ``node.category`` and, at cosine 0.95 or above, links the caller to the
+    preference that is already there instead of creating a node. Two actors
+    sharing a category and stating near-paraphrases of the same preference is
+    the case the workshop's isolation lesson depends on, and it is exactly the
+    case that merges.
+    """
+
+    def test_two_actors_get_two_categories(self) -> None:
+        self.assertNotEqual(
+            preference_category(RUN_PREFIX, "alice"),
+            preference_category(RUN_PREFIX, "blake"),
+        )
+
+    def test_both_actors_stay_inside_the_run_namespace(self) -> None:
+        # One prefix still reaches both categories, which is what lets cleanup
+        # sweep a run without knowing the actor labels.
+        run_categories = preference_category_prefix(RUN_PREFIX)
+        for label in ("alice", "blake"):
+            self.assertTrue(
+                preference_category(RUN_PREFIX, label).startswith(
+                    run_categories
+                )
+            )
+
+    def test_the_run_namespace_sits_inside_the_lab_namespace(self) -> None:
+        self.assertTrue(
+            preference_category_prefix(RUN_PREFIX).startswith(
+                PREFERENCE_CATEGORY_PREFIX
+            ),
+            "--all has to reach every run's categories",
+        )
+
+    def test_the_default_prefix_matches_the_constant(self) -> None:
+        self.assertEqual(
+            preference_category_prefix(DEMO_ID_PREFIX),
+            PREFERENCE_CATEGORY_PREFIX,
+        )
+
+
+class TestCleanupScopeResolution(unittest.TestCase):
+    """The command line defaults to one run, never to the whole instance."""
+
+    @staticmethod
+    def _scope(argv: list[str]):
+        return cleanup_memory.resolve_scope(cleanup_memory.parse_args(argv))
+
+    def test_no_arguments_resolve_to_no_scope(self) -> None:
+        # The old default swept the instance. On a shared Aura instance that
+        # deleted every other participant's in-flight records.
+        self.assertIsNone(self._scope([]))
+
+    def test_main_exits_nonzero_without_a_scope(self) -> None:
+        with mock.patch.object(
+            cleanup_memory, "load_config", return_value=CONFIG
+        ):
+            with mock.patch.object(
+                cleanup_memory.GraphDatabase, "driver"
+            ) as driver:
+                self.assertEqual(cleanup_memory.main([]), 2)
+        driver.assert_not_called()
+
+    def test_run_prefix_bounds_both_namespaces(self) -> None:
+        scope = self._scope(["--run-prefix", RUN_PREFIX])
+        self.assertEqual(scope.id_prefix, RUN_PREFIX)
+        self.assertEqual(
+            scope.category_prefix, preference_category_prefix(RUN_PREFIX)
+        )
+        self.assertNotEqual(scope.id_prefix, DEMO_ID_PREFIX)
+        self.assertNotEqual(scope.category_prefix, PREFERENCE_CATEGORY_PREFIX)
+
+    def test_run_prefix_outside_the_lab_namespace_is_refused(self) -> None:
+        self.assertIsNone(self._scope(["--run-prefix", "hotels"]))
+
+    def test_all_needs_the_typed_confirmation(self) -> None:
+        with mock.patch("builtins.input", return_value="yes"):
+            self.assertIsNone(self._scope(["--all"]))
+        with mock.patch(
+            "builtins.input", return_value=cleanup_memory.ALL_CONFIRMATION
+        ):
+            scope = self._scope(["--all"])
+        self.assertEqual(scope.id_prefix, DEMO_ID_PREFIX)
+        self.assertEqual(scope.category_prefix, PREFERENCE_CATEGORY_PREFIX)
+
+    def test_all_is_refused_when_no_answer_can_be_read(self) -> None:
+        with mock.patch("builtins.input", side_effect=EOFError):
+            self.assertIsNone(self._scope(["--all"]))
+
+    def test_dry_run_over_all_asks_nothing_and_deletes_nothing(self) -> None:
+        with mock.patch("builtins.input", side_effect=AssertionError):
+            scope = self._scope(["--all", "--dry-run"])
+        self.assertEqual(scope.id_prefix, DEMO_ID_PREFIX)
+
+    def test_dry_run_issues_no_delete(self) -> None:
+        driver = FakeCleanupDriver([12, 12])
+        with mock.patch.object(
+            cleanup_memory.GraphDatabase, "driver", return_value=driver
+        ):
+            cleanup_memory.run_cleanup(
+                CONFIG, cleanup_memory.run_scope(RUN_PREFIX), dry_run=True
+            )
+        queries = driver.session_obj.queries()
+        for _, delete_query, count_query in cleanup_memory.SWEEPS:
+            self.assertNotIn(delete_query, queries)
+            self.assertIn(count_query, queries)
+        self.assertNotIn(
+            cleanup_memory.REMOVE_SHARED_PREFERENCE_MARKERS, queries
+        )
+
+    def test_a_run_scoped_sweep_only_ever_sees_its_own_prefix(self) -> None:
+        driver = FakeCleanupDriver([12, 12])
+        with mock.patch.object(
+            cleanup_memory.GraphDatabase, "driver", return_value=driver
+        ):
+            cleanup_memory.run_cleanup(
+                CONFIG, cleanup_memory.run_scope(RUN_PREFIX)
+            )
+        swept = [params for _, params in driver.session_obj.calls if params]
+        self.assertTrue(swept)
+        for params in swept:
+            self.assertEqual(params["prefix"], RUN_PREFIX)
+            self.assertEqual(
+                params["category_prefix"],
+                preference_category_prefix(RUN_PREFIX),
+            )
 
 
 if __name__ == "__main__":

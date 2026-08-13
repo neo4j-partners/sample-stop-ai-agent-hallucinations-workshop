@@ -407,12 +407,14 @@ def readiness_problems(
     return problems
 
 
-REQUIRED_ENV_VARS = ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
-
-
 def _missing_configuration() -> list[str]:
     """Return a corrective line when required Neo4j env values are absent."""
-    missing = [name for name in REQUIRED_ENV_VARS if not os.environ.get(name)]
+    # contracts owns the required-variable tuple and the database default. A
+    # second copy here would let this script accept a connection the read and
+    # write paths reject, or default to a different database than they use.
+    missing = [
+        name for name in contracts.REQUIRED_NEO4J_ENV if not os.environ.get(name)
+    ]
     if missing:
         return [f"set {', '.join(missing)} in your environment or .env"]
     return []
@@ -422,7 +424,7 @@ def _configuration() -> tuple[str, tuple[str, str], str]:
     return (
         os.environ["NEO4J_URI"],
         (os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"]),
-        os.environ.get("NEO4J_DATABASE", "neo4j"),
+        os.environ.get("NEO4J_DATABASE") or contracts.DEFAULT_NEO4J_DATABASE,
     )
 
 
@@ -454,7 +456,11 @@ def main() -> int:
         return 1
 
     uri, auth, database = _configuration()
-    driver = GraphDatabase.driver(uri, auth=auth)
+    # notifications_min_severity="OFF" matches the drivers hybrid_retrieval and
+    # reservation_command open. Without it this readiness step prints Neo4j
+    # planner notices the Lab 2 and Lab 4 paths both suppress, so the same
+    # query looks different depending on which file opened the connection.
+    driver = GraphDatabase.driver(uri, auth=auth, notifications_min_severity="OFF")
     problems: list[str] = []
     try:
         driver.verify_connectivity()

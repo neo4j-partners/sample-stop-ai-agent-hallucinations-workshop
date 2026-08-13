@@ -90,7 +90,17 @@ RETURN request.request_id AS request_id,
 
 @dataclass(frozen=True)
 class Neo4jCommandConfig:
-    """Connection values used by the reservation Lambda."""
+    """Connection values used by the reservation Lambda.
+
+    Near-identical to ``hybrid_retrieval.Neo4jConfig``, and deliberately not
+    imported from it. The Lambda deployment package installs this package with
+    ``--no-deps``, so every import this module makes has to resolve from the
+    Lambda's own short dependency list. ``hybrid_retrieval`` imports
+    ``neo4j-graphrag``, which the reservation handler never uses and which would
+    add tens of megabytes to the zip; importing from it here builds fine and
+    fails at Lambda cold start. Keep the two in step by hand, and keep the
+    shared constants they both read in ``contracts``.
+    """
 
     uri: str
     username: str

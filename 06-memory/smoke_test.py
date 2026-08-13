@@ -11,8 +11,8 @@ layer is usable before the scenario notebook is run:
    ``get_context``.
 3. The library-managed memory vector indexes exist with Titan V2's 1024
    dimensions.
-4. The stored message embedding is non-empty (the zero-length-vector failure
-   mode this module's explicit embedder exists to prevent).
+4. The stored message embedding is non-empty, which is the zero-length-vector
+   failure mode this lab's explicit embedder exists to prevent.
 
 Everything the test writes is deleted afterwards, including the throwaway
 ``User`` node.
@@ -43,6 +43,7 @@ from neo4j.exceptions import DriverError, Neo4jError
 from neo4j_agent_memory.llm.errors import ProviderError
 
 from memory_helpers import (
+    DEMO_ID_PREFIX,
     MEMORY_EMBEDDING_DIMENSIONS,
     MEMORY_VECTOR_INDEXES,
     MemoryDemoConfig,
@@ -101,8 +102,10 @@ def delete_smoke_user(config: MemoryDemoConfig, user_identifier: str) -> None:
 
 async def run_checks(config: MemoryDemoConfig) -> int:
     """Run the four validation checks against live Neo4j and Bedrock."""
-    session_id = f"memory-smoke-{uuid.uuid4().hex[:8]}"
-    user_identifier = f"smoke-user-{uuid.uuid4().hex[:8]}"
+    # Both ids sit inside the lab namespace so that anything an interrupted
+    # smoke test leaves behind is still reachable by cleanup_memory.py.
+    session_id = f"{DEMO_ID_PREFIX}smoke-{uuid.uuid4().hex[:8]}"
+    user_identifier = f"{DEMO_ID_PREFIX}smoke-user-{uuid.uuid4().hex[:8]}"
     print(f"Throwaway session: {session_id}")
     print(f"Throwaway user:    {user_identifier}")
 

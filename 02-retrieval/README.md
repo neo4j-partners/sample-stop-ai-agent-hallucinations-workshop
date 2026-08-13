@@ -29,6 +29,10 @@ Four retrievers run against the graph Lab 1 built. The two required notebooks ea
 
 Run `2.1` then `2.2`. `2.3` is optional and can be skipped for time; nothing later in the workshop depends on it.
 
+`retrieval_patterns.ipynb` also sits in this folder. It is retired reference material, banner-marked as such in its first cell, absent from the notebook runner, and superseded by the three above. Read it for the original wording if you want it; do not run it.
+
+**Time budget.** Allow about 50 minutes for `2.1` and `2.2` together, and 15 more for `2.3`. Machine execution is a small part of that: measured end to end, `2.1` takes 18 seconds, `2.2` 40 seconds, and `2.3` 17 seconds. The rest is reading output on the screen and talking about it.
+
 ### `2.1_vector_retrievers.ipynb`
 
 `VectorRetriever` is the standard-RAG baseline. It embeds the question, finds the nearest `:Chunk` nodes, and returns their text. Both patterns in this notebook run the same hero question, *"What amenities and guest rating does AnyCompany Cairo Nile View have?"*, at the same `top_k`, over the same index, with the same embedding, so the only thing that differs between the two outputs is what happens after the vector search returns.
@@ -39,7 +43,9 @@ Both retrievers find the same chunks, and the printed scores line up to show it.
 
 ### `2.2_fulltext_retrievers.ipynb`
 
-Embeddings blur exact strings. A postal code, a confirmation number, and a SKU all embed to roughly "short numeric token", so a question containing one returns chunks about the right topic and the wrong record. The notebook asks for the cancellation policy of the hotel at postal code `60611` and runs it two ways: `VectorRetriever` alone for the semantic-only comparison, then `HybridRetriever` fusing a vector arm and a Lucene full-text arm. Both result sets print, followed by one line giving the rank of the `60611` chunk in each, which is the delta in a form that reads on a projector. An assertion after it fails if the correct chunk is absent from the hybrid results, which is the honest part of the comparison.
+Embeddings blur exact strings. A postal code, a confirmation number, and a SKU all embed to roughly "short numeric token", so a question containing one returns chunks about the right topic and the wrong record. The notebook asks for the cancellation policy of the hotel at postal code `60611` and runs it two ways: `VectorRetriever` alone for the semantic-only comparison, then `HybridRetriever` fusing a vector arm and a Lucene full-text arm. Both result sets print, followed by one line giving the rank of the `60611` chunk in each, which is the delta in a form that reads on a projector.
+
+That comparison is tuned rather than default, and the notebook says so on screen before the results: the vector arm gets the whole question, the full-text arm gets the bare string `60611`, and fusion is `ranker="linear", alpha=0.2`, which weights the full-text arm at 0.8 against a library default of `naive`. Two assertions follow, one per arm. The first fails if the correct chunk is absent from the hybrid results. The second fails if the vector-only arm ranked it above the hybrid arm, so a run where fusion does not earn its place stops rather than printing a verdict the prose contradicts.
 
 `HybridCypherRetriever` is that fusion plus a traversal in the same shape as the one in `2.1`, deliberately narrower: it returns `hotel_id`, `hotel_name`, `address`, `guest_rating`, and up to twelve amenity names sorted alphabetically, with no rooms, policies, or services. A tool contract is a promise about what comes back, and the narrow promise is the one that holds when a model rather than a person is reading the result. It is the one retriever the rest of the workshop uses, so it is not built inline. It lives in [`workshop/src/workshop/hybrid_retrieval.py`](../workshop/src/workshop/hybrid_retrieval.py) behind a function that accepts exactly one field:
 
@@ -49,7 +55,9 @@ search_hotel_knowledge(query: str) -> list[HotelEvidence]
 
 Fusion is `NAIVE`, `top_k` is fixed at 5, at most twelve amenities come back, and the traversal is the same reviewed Cypher every time. There is no ranker, alpha, top-k, or retriever-mode parameter for a caller to set. Those comparisons are the ones the participant just ran by hand; a request does not get to re-run them. `2.2` already wraps this function in a Strands `@tool` for the closing agent. Lab 3 gives that same function, unchanged, to `hotel_agent` alongside lifecycle hooks and a booking tool, Lab 4 writes against the `hotel_id` it returns, and Lab 5 deploys it unchanged.
 
-The hero question, *"What amenities and guest rating does AnyCompany Cairo Nile View have?"*, makes every arm earn its place. The exact hotel name is what the full-text arm is for, "amenities and guest rating" is a paraphrase of the document's own wording and is what the vector arm is for, and the rating and the amenity list are in neither matched chunk. The traversal is what produces them.
+The hero question, *"What amenities and guest rating does AnyCompany Cairo Nile View have?"*, makes every arm earn its place. The exact hotel name is what the full-text arm is for, and "amenities and guest rating" is a paraphrase of the document's own wording, which is what the vector arm is for.
+
+Both arms return the same thing: chunk text. Lab 1 chunks at 12000 characters, so each 7 KB source document is a single chunk, and the rating and the amenities are inside it as prose. `**Guest Rating:** 4.5/5.0` sits six lines into the Cairo document. The traversal returns those same facts as named fields instead: `guest_rating` as the number `4.5`, and `amenities` as a list built from the hotel's `OFFERS_AMENITY` edges rather than from whatever the matched chunk happens to mention. A field is queryable, assertable, and safe to hand to a write path. A sentence is none of those. `2.2` prints the fusion's own text output and then the traversal's fields, so the difference is watched rather than described.
 
 ## The abstention is the point of the lab
 
@@ -59,7 +67,7 @@ The hero question, *"What amenities and guest rating does AnyCompany Cairo Nile 
 
 The graph knows the hotel and does not know the availability fact. The retriever returns hotel evidence and no availability evidence, so the agent says it cannot determine the answer instead of reading "subject to availability" as a yes.
 
-Both halves of that are shown rather than asserted from the prose. Before the agent sees the availability question, the notebook prints `GROUNDING_INSTRUCTIONS`, the shared refusal prompt the agent is carrying, and then the retriever's actual return for that question, field by field, so it is visible that not one field in the payload is about availability on a date.
+Both halves of that are shown rather than asserted from the prose. Before the agent sees the availability question, the notebook prints `GROUNDING_INSTRUCTIONS`, the shared refusal prompt the agent is carrying. After the agent answers, it prints the tool result the agent itself received, recorded by the `@tool` wrapper as it was handed over, field by field, so it is visible that not one field in the payload the model read is about availability on a date.
 
 That prompt is the one refusal pattern the lab uses, and it is a good one: it names "subject to availability" as policy language rather than as evidence of a vacancy. Confidence thresholds and score cutoffs stay out of the lab.
 
@@ -124,13 +132,13 @@ uv run setup/run_notebooks.py --labs 2
 uv run setup/run_notebooks.py --list
 ```
 
-The runner is a PEP 723 script, so `uv` manages its own cached environment and there is no separate install step. `--labs 2` executes all three notebooks into a temporary copy, leaves the sources untouched, and exits nonzero if any cell raises. It creates no AWS resources. A clean run proves the cells did not raise; it does not validate the narrative claims above unless the notebook itself asserts them, which `2.2` does twice: once for the `60611` result and once for the shape of the evidence behind the abstention.
+The runner is a PEP 723 script, so `uv` manages its own cached environment and there is no separate install step. `--labs 2` executes all three notebooks into a temporary copy, leaves the sources untouched, and exits nonzero if any cell raises. It creates no AWS resources. A clean run proves the cells did not raise; it does not validate the narrative claims above unless the notebook itself asserts them. Four claims are asserted: `2.1` checks that both of its patterns returned the same scores in the same order, and `2.2` checks the `60611` chunk against each arm separately and then checks the shape of the evidence behind the abstention.
 
 ---
 
 ## Troubleshooting
 
-**A retriever returns nothing.** Confirm which question. An empty result on the availability question at the end of `2.2` is the designed outcome, not a fault. An empty result on the check-in, `60611`, or hero questions means the graph is missing or was built from a different corpus. The verification cell at the top of the notebook names the absent fixture, in the form `Windward Mile Tower hotel at postal code 60611: found 0, expected at least 1`. Re-run Lab 1 and let it finish.
+**A retriever returns nothing.** Confirm which question. An empty result on the availability question at the end of `2.2` is the designed outcome, not a fault. An empty result on the hero question, the `60611` question, or `2.3`'s swimming-pool count means the graph is missing or was built from a different corpus. The verification cell at the top of the notebook names the absent fixture, in the form `Windward Mile Tower hotel at postal code 60611: found 0, expected at least 1`. Re-run Lab 1 and let it finish.
 
 **A missing or offline index.** `verify_retrieval_indexes` raises `Retrieval index check failed:` followed by one line per problem, such as `missing index 'hotel_chunk_embeddings'` or an index in a state other than `'ONLINE'`. Lab 2 never creates indexes. Lab 1 creates both, idempotently, and waits for them to come online. Re-run it.
 

@@ -1,18 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Shared knowledge-graph build machinery for the Graph-RAG demo.
+"""Shared knowledge-graph build machinery for Lab 1.
 
-`build_graph.py` and `build_graph_lite.py` differ only in which documents they
-feed in. Everything else, the pinned schema, the canary check, the scoped wipe,
-and the verification queries, lives here so the two paths cannot drift apart
-the way they previously did (one verified on `h.id`, the other on `h.name`,
-and neither matched the notebook).
+`prepare_graph.py` and the notebook both call `run_build` here, so the pinned
+schema, the canary check, the scoped wipe, and the verification queries have one
+definition and the script path and the notebook path cannot drift apart the way
+they previously did (one verified on `h.id`, the other on `h.name`, and neither
+matched the notebook).
 
 Build order matters and is deliberate:
 
-    wipe -> canary (3 docs) -> verify typing -> wipe canary -> ingest all -> report
+    wipe -> canary (3 docs) -> verify typing -> wipe canary -> ingest all
+    -> retry the failures -> report
 
-The wipe happens *before* the canary. The graph this script builds is
+The wipe happens *before* the canary. The graph this lab builds is
 disposable, rebuilt from scratch on every run, so there is nothing
 worth preserving across a failed build. Wiping first also means the canary
 runs against an empty graph, so entity resolution has nothing to merge into
@@ -47,24 +48,49 @@ from workshop.retrieval_setup import (
     report_readiness,
 )
 
-# Must sit above the worst case of the Bedrock retry chain (see
-# bedrock_providers.BEDROCK_CONFIG): 3 attempts x 45s + backoff = ~135s < 180s.
+# The per-document bound the build enforces with `asyncio.wait_for`. It sits
+# above a single Bedrock read timeout, not above the whole retry chain:
+# `bedrock_providers.BEDROCK_CONFIG` allows 6 attempts at 45s, so a worst case
+# of six consecutive hung sockets runs to 270s. That case ends with this
+# timeout firing and the build moving on while the worker thread underneath
+# keeps going, which is the trade recorded next to BEDROCK_CONFIG.
 DOC_TIMEOUT_SECONDS = 180
 
 # The canary samples several documents rather than one. LLM extraction is
 # stochastic, so a single-document gate intermittently fails a healthy
-# pipeline, and an attendee who hits that concludes the demo is broken.
+# pipeline, and a participant who hits that concludes the lab is broken.
 CANARY_DOCS = 3
 
+# A document that failed once is tried once more. Extraction failures are
+# usually a throttle or a timeout rather than a bad document, and without a
+# retry one lost document costs a full rebuild.
+RETRY_PASSES = 1
+
 # Everything neo4j-graphrag writes carries this label, so the wipe can be
-# scoped to this demo's own output instead of `MATCH (n) DETACH DELETE n`,
+# scoped to this lab's own output instead of `MATCH (n) DETACH DELETE n`,
 # which would also take out anything else sharing the instance.
 KG_LABEL = "__KGBuilder__"
+
+
+def graph_database() -> str:
+    """Return the Neo4j database every session in this build opens.
+
+    Read at call time rather than at import so a `.env` loaded by the caller is
+    already in the environment. `NEO4J_DATABASE` used to be honoured by the
+    fixture seed and ignored here, which left a non-default database holding
+    half the lab.
+    """
+    return os.environ.get("NEO4J_DATABASE", "neo4j")
 
 
 def connect() -> Driver:
     """Open a Neo4j driver using NEO4J_USERNAME / NEO4J_PASSWORD."""
     return GraphDatabase.driver(NEO4J_URI, auth=neo4j_auth())
+
+
+def session(driver: Driver):
+    """Open a session against the configured database."""
+    return driver.session(database=graph_database())
 
 
 def build_pipeline(driver: Driver) -> SimpleKGPipeline:
@@ -105,23 +131,60 @@ def snapshot_chunk_ids(driver: Driver) -> set[str]:
     it produced one and deduplicated it. Chunks are never merged, so they are a
     stable handle on "what this run just extracted".
     """
-    with driver.session() as session:
+    with session(driver) as neo4j_session:
         return {
             record["id"]
-            for record in session.run("MATCH (c:Chunk) RETURN elementId(c) AS id")
+            for record in neo4j_session.run(
+                "MATCH (c:Chunk) RETURN elementId(c) AS id"
+            )
         }
 
 
-def clear_demo_graph(driver: Driver) -> None:
-    """Delete only the nodes this demo created."""
-    with driver.session() as session:
-        session.run(f"MATCH (n:`{KG_LABEL}`) DETACH DELETE n")
+def clear_lab_graph(driver: Driver) -> None:
+    """Delete only the nodes this lab created."""
+    with session(driver) as neo4j_session:
+        neo4j_session.run(f"MATCH (n:`{KG_LABEL}`) DETACH DELETE n")
 
 
-async def ingest(pipeline: SimpleKGPipeline, paths: list[Path]) -> int:
-    """Run every document through the pipeline. Returns the error count."""
+# Entities are deleted only when every chunk they came from belongs to the
+# document being cleared. `perform_entity_resolution=True` merges a hotel two
+# documents both mention into one node, and deleting that node would take a
+# healthy document's extraction with it.
+DELETE_DOCUMENT_ENTITIES = """
+MATCH (d:Document {path: $filename})<-[:FROM_DOCUMENT]-(c:Chunk)
+WITH collect(c) AS chunks
+UNWIND chunks AS chunk
+MATCH (entity)-[:FROM_CHUNK]->(chunk)
+WITH DISTINCT entity, chunks
+WHERE all(source IN [(entity)-[:FROM_CHUNK]->(x) | x] WHERE source IN chunks)
+DETACH DELETE entity
+"""
+
+DELETE_DOCUMENT_LEXICAL = """
+MATCH (d:Document {path: $filename})
+OPTIONAL MATCH (c:Chunk)-[:FROM_DOCUMENT]->(d)
+DETACH DELETE c, d
+"""
+
+
+def clear_document(driver: Driver, filename: str) -> None:
+    """Remove everything one source document wrote, so a retry starts clean.
+
+    A run that fails inside extraction can still have committed the lexical
+    graph, and every node here is written with `CREATE` rather than `MERGE`. A
+    plain retry would therefore leave a second `:Document` and a second
+    `:Chunk` for that file, and the count assertion at the end of the build
+    would fire on a graph that is otherwise complete.
+    """
+    with session(driver) as neo4j_session:
+        neo4j_session.run(DELETE_DOCUMENT_ENTITIES, filename=filename).consume()
+        neo4j_session.run(DELETE_DOCUMENT_LEXICAL, filename=filename).consume()
+
+
+async def ingest(pipeline: SimpleKGPipeline, paths: list[Path]) -> list[Path]:
+    """Run every document through the pipeline. Returns the ones that failed."""
     total = len(paths)
-    errors = 0
+    failures: list[Path] = []
     for i, path in enumerate(paths, 1):
         text = path.read_text(encoding="utf-8")
         print(f"  [{i}/{total}] {path.name}...", end=" ", flush=True)
@@ -136,12 +199,37 @@ async def ingest(pipeline: SimpleKGPipeline, paths: list[Path]) -> int:
             )
             print("✅")
         except asyncio.TimeoutError:
-            errors += 1
+            failures.append(path)
             print("⏰ timeout")
         except Exception as exc:  # noqa: BLE001 - one bad doc must not stop the build
-            errors += 1
+            failures.append(path)
             print(f"❌ {str(exc)[:80]}")
-    return errors
+    return failures
+
+
+async def retry_failures(
+    driver: Driver,
+    pipeline: SimpleKGPipeline,
+    failures: list[Path],
+) -> list[Path]:
+    """Re-ingest failed documents, clearing each one's partial write first.
+
+    Without this, a single throttled document costs a fifteen-minute rebuild:
+    the count assertion below fires, and the next run clears the graph and
+    starts over. Returns whatever still failed after `RETRY_PASSES`.
+    """
+    remaining = failures
+    for attempt in range(1, RETRY_PASSES + 1):
+        if not remaining:
+            break
+        print(
+            f"\nRetry pass {attempt} of {RETRY_PASSES}: "
+            f"{len(remaining)} document(s) to re-ingest"
+        )
+        for path in remaining:
+            clear_document(driver, path.name)
+        remaining = await ingest(pipeline, remaining)
+    return remaining
 
 
 def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
@@ -151,15 +239,15 @@ def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
     the chunks this run created, so the check is correct whether the entity was
     newly inserted or merged into an existing node by entity resolution.
 
-    An empty list means extraction honoured the contract in
-    `query_knowledge_graph`'s docstring.
+    An empty list means extraction honoured the pinned schema in
+    `workshop.graph_schema`, which is the contract Labs 2 through 5 query.
     """
     problems: list[str] = []
     ids = list(chunk_ids)
-    with driver.session() as session:
+    with session(driver) as neo4j_session:
         labels = {
             record["label"]: record["count"]
-            for record in session.run(
+            for record in neo4j_session.run(
                 """
                 MATCH (c:Chunk)<-[:FROM_CHUNK]-(n)
                 WHERE elementId(c) IN $ids
@@ -188,7 +276,7 @@ def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
         # because inventing an `Address` node is a schema failure rather than
         # a bad roll.
         hotels = list(
-            session.run(
+            neo4j_session.run(
                 """
                 MATCH (c:Chunk)<-[:FROM_CHUNK]-(h:Hotel)
                 WHERE elementId(c) IN $ids
@@ -236,23 +324,25 @@ def count_documents(driver: Driver) -> int:
     run was left behind, and the resulting graph looks plausible while being
     wrong.
     """
-    with driver.session() as session:
-        return session.run(
+    with session(driver) as neo4j_session:
+        return neo4j_session.run(
             "MATCH (d:Document) RETURN count(d) AS count"
         ).single()["count"]
 
 
 def count_chunks(driver: Driver) -> int:
     """Return the number of :Chunk nodes in the graph."""
-    with driver.session() as session:
-        return session.run("MATCH (c:Chunk) RETURN count(c) AS count").single()["count"]
+    with session(driver) as neo4j_session:
+        return neo4j_session.run(
+            "MATCH (c:Chunk) RETURN count(c) AS count"
+        ).single()["count"]
 
 
 def report(driver: Driver) -> None:
     """Print the graph shape plus the three queries the notebook depends on."""
-    with driver.session() as session:
+    with session(driver) as neo4j_session:
         print("\nNode labels:")
-        for record in session.run(
+        for record in neo4j_session.run(
             """
             MATCH (n)
             WHERE any(l IN labels(n) WHERE l IN $labels)
@@ -265,7 +355,7 @@ def report(driver: Driver) -> None:
             print(f"  :{record['label']}: {record['count']}")
 
         print("\nRelationship types:")
-        for record in session.run(
+        for record in neo4j_session.run(
             """
             MATCH ()-[r]->()
             WHERE type(r) IN ['HAS_ROOM', 'OFFERS_AMENITY',
@@ -278,7 +368,7 @@ def report(driver: Driver) -> None:
 
         print("\n--- Acceptance queries (these are what the notebook asks) ---")
 
-        record = session.run(
+        record = neo4j_session.run(
             """
             MATCH (h:Hotel)
             WHERE toLower(h.address) CONTAINS 'paris'
@@ -290,7 +380,7 @@ def report(driver: Driver) -> None:
             f"across {record['hotels']} hotels"
         )
 
-        record = session.run(
+        record = neo4j_session.run(
             """
             MATCH (h:Hotel)-[:OFFERS_AMENITY]->(a:Amenity)
             WHERE toLower(a.name) CONTAINS 'pool'
@@ -300,7 +390,7 @@ def report(driver: Driver) -> None:
         print(f"  Counting  hotels with a pool: {record['hotels']}")
 
         print("  Multi-hop  Cairo hotels with spa AND pool:")
-        rows = session.run(
+        rows = neo4j_session.run(
             """
             MATCH (h:Hotel)-[:OFFERS_AMENITY]->(spa:Amenity),
                   (h)-[:OFFERS_AMENITY]->(pool:Amenity)
@@ -319,7 +409,7 @@ def report(driver: Driver) -> None:
 
 
 async def run_build(paths: list[Path], title: str) -> int:
-    """Canary, verify, wipe, ingest, report. Returns a process exit code."""
+    """Canary, verify, wipe, ingest, retry, report. Returns an exit code."""
     if not paths:
         print("No documents selected.")
         return 1
@@ -331,11 +421,12 @@ async def run_build(paths: list[Path], title: str) -> int:
             print(f"  - {filename}")
         return 1
 
-    print(f"{title}: {len(paths)} documents\n")
+    print(f"{title}: {len(paths)} documents")
+    print(f"Database: {graph_database()}\n")
     driver = connect()
     try:
         print("Clearing the previous graph this lab built...")
-        clear_demo_graph(driver)
+        clear_lab_graph(driver)
         print("✅ Cleared\n")
 
         canary = paths[:CANARY_DOCS]
@@ -348,28 +439,40 @@ async def run_build(paths: list[Path], title: str) -> int:
         new_chunks = snapshot_chunk_ids(driver) - baseline
         if not new_chunks:
             print("\n❌ Canary produced no :Chunk. Extraction did not run.")
-            clear_demo_graph(driver)  # leave a clean, empty graph on failure
+            clear_lab_graph(driver)  # leave a clean, empty graph on failure
             return 1
         problems = check_schema_held(driver, new_chunks)
         if problems:
             print("\n❌ Canary failed. The graph was cleared; fix and re-run:")
             for problem in problems:
                 print(f"  - {problem}")
-            clear_demo_graph(driver)  # remove the canary's partial docs
+            clear_lab_graph(driver)  # remove the canary's partial docs
             return 1
         print("✅ Canary passed: extraction matches the documented schema\n")
 
         print("Clearing the canary's documents before the full ingest...")
-        clear_demo_graph(driver)
+        clear_lab_graph(driver)
         print("✅ Cleared\n")
 
-        errors = await ingest(pipeline, paths)
+        failures = await ingest(pipeline, paths)
         # No `await pipeline.close()` here. `SimpleKGPipeline` defines no
         # `close()`, so that call raised `AttributeError` at the end of every
         # otherwise-successful build. It owns no resource needing release; the
         # driver is closed in the `finally` below.
 
-        acknowledged = len(paths) - errors
+        # The retry runs before the count check below, so a throttled document
+        # gets a second attempt instead of costing a fifteen-minute rebuild.
+        # The assertion itself is unchanged: every selected source still has to
+        # end up with exactly one Document and one Chunk.
+        failures = await retry_failures(driver, pipeline, failures)
+        if failures:
+            print(
+                f"\n{len(failures)} document(s) still failed after the retry pass:"
+            )
+            for path in failures:
+                print(f"  - {path.name}")
+
+        acknowledged = len(paths) - len(failures)
         print(f"\n{'=' * 60}")
         print(
             f"BUILD COMPLETE ({acknowledged}/{len(paths)} ingests acknowledged)"
@@ -388,7 +491,7 @@ async def run_build(paths: list[Path], title: str) -> int:
                 "overlapped this one, or a partial run was left behind."
             )
             return 1
-        if errors:
+        if failures:
             print(
                 "⚠️ One or more client acknowledgements were lost, but every "
                 "source has a committed Document and Chunk. Continuing with "

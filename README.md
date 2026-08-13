@@ -39,7 +39,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 | 0 | [Setup](./00-setup/) | None. A credential checklist | An Aura instance, Bedrock access, and one repo-root `.env` |
 | 1 | [Graph build](./01-graph-build/) | `1.1_build_graph.ipynb` | The hotel knowledge graph, built live by Bedrock extraction against a pinned schema, with vector and full-text indexes |
 | 2 | [Retrieval](./02-retrieval/) | `2.1_vector_retrievers.ipynb`, `2.2_fulltext_retrievers.ipynb`, `2.3_text2cypher.ipynb` | Four retrievers run side by side on the same questions, closing on one the graph cannot answer |
-| 3 | [Agents and tools](./03-agents-and-tools/) | `3.1_strands_primer.ipynb` | Agents, tools, lifecycle hooks, and swarms, ending with one named `hotel_agent` that calls the Lab 2 retriever |
+| 3 | [Agents and tools](./03-agents-and-tools/) | `3.1_strands_primer.ipynb` | Agents, tools, and lifecycle hooks, ending with one named `hotel_agent` that calls the Lab 2 retriever |
 | 4 | [The grounded write](./04-grounded-write/) | `4.1_reservation_write.ipynb` | An idempotent reservation write, with a rule read from the graph rejecting a request the prompt alone would allow |
 | 5 | [Deploy to AgentCore](./05-agentcore-deploy/) | `5.1_agentcore_deploy.ipynb`, `5.2_teardown.ipynb`, `5.3_agentcore_walkthrough.ipynb` | The same agent hosted on AgentCore Runtime with the retriever unchanged, then torn down |
 | 6 | [Neo4j agent memory](./06-memory/) | `6.1_neo4j_agent_memory.ipynb` | Optional. Graph-native memory with provenance and actor isolation |
@@ -126,17 +126,19 @@ Lab 2 runs both against the same graph so the difference is watched rather than 
 
 Nine modules are used by more than one lab, so they live in one installable package at [`workshop/`](workshop/) rather than being copied between lab folders:
 
-| Module | Labs that need it |
+| Module | Labs that import it |
 |---|---|
-| `retrieval_contract.py` | 1, 2, 4, 5 |
-| `bedrock_providers.py` | 1, 2 |
+| `retrieval_contract.py` | 0, 1, 2 |
+| `bedrock_providers.py` | 0, 1, 2, 3, 4, 5 |
 | `retrieval_setup.py` | 1, 2 |
-| `graph_connection.py` | 1, 2, 4, 5 |
+| `graph_connection.py` | 1, 2 |
 | `graph_schema.py` | 1, 2 |
-| `contracts.py` | 2, 4, 5 |
-| `graph_setup.py` | 1, 4 |
+| `contracts.py` | 0, 1, 2, 4, 5 |
+| `graph_setup.py` | 1, 2, 4, 5, 6 |
 | `hybrid_retrieval.py` | 2, 3, 4, 5 |
 | `reservation_command.py` | 4, 5 |
+
+Direct imports only. Labs 4 and 5 read the five embedding and index constants through `contracts.py`, which re-exports them rather than restating them, so they do not import `retrieval_contract.py` by name.
 
 The five embedding and index constants matter most. `EMBEDDING_MODEL_ID`, `EMBEDDING_PURPOSE`, `EMBEDDING_DIMENSIONS`, `CHUNK_VECTOR_INDEX`, and `CHUNK_FULLTEXT_INDEX` have to agree between the lab that writes the graph and the labs that read it. A mismatch returns wrong results with no error, so they have exactly one definition.
 
@@ -195,7 +197,7 @@ cd 04-grounded-write
 uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-The suites, as they stand: 12 tests in Lab 1, 56 in Lab 4, 20 in Lab 5, and 22 in Lab 6. Of Lab 4's 56, the reservation command and its contracts account for 29, spread across `test_reservation_command.py` and `test_contracts.py`. Live tests self-skip when credentials are absent.
+The suites, as they stand: 12 tests in Lab 1, 56 in Lab 4, 29 in Lab 5, and 27 in Lab 6. Of Lab 4's 56, the reservation command and its contracts account for 29, spread across `test_reservation_command.py` and `test_contracts.py`. Lab 5's 29 are 20 in `test_workshop_cleanup.py` plus 9 in `deployment-tools/test_runtime_integration.py`, which a bare `pytest` collects together. Labs 2 and 3 have no test files; the notebook runner covers them. Live tests self-skip when credentials are absent, and [the CI workflow](.github/workflows/offline-gate.yml) asserts these four counts on every push so they cannot drift again.
 
 ### Provision the AgentCore infrastructure (Lab 5 only)
 

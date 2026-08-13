@@ -2,7 +2,11 @@
 -e ../workshop
 
 bedrock-agentcore-starter-toolkit
-strands-agents>=1.27.0
+# Upper bound on purpose. booking_agent.py builds on the hook API, and
+# BeforeToolCallEvent and AfterToolCallEvent are what pin the caller's
+# request_id and carry the command's verdict back out. A major version is free
+# to rename either one, so let the resolver take 1.x only.
+strands-agents>=1.27.0,<2.0.0
 
 # deployment-tools/booking_agent.py is the file that ships into the image, but a
 # facilitator reads and edits it with this venv active. Declaring its two
