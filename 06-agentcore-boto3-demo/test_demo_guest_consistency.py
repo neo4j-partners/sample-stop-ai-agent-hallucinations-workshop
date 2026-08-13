@@ -1,60 +1,78 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Prove the shared guest-limit scenario without coupling demo outcomes."""
+"""Prove the guest limit has exactly one source of truth.
+
+`contracts.MAX_GUESTS` is the limit the reservation command enforces, the
+rule the graph is seeded with, and the rule the readiness check validates
+against. Those three must agree, and the way they agree is that
+`graph_setup.py` refers to the constant instead of repeating the number.
+A literal `10` in the seeding call would pass every other test in the demo
+and still leave a participant's graph disagreeing with the command.
+
+Lab 4 extends this with an assertion against the `Rule` node in a live
+graph, which is the only check that catches a graph seeded by an older
+version of this code.
+"""
 
 import ast
-import importlib.util
 import unittest
 from pathlib import Path
 
 import contracts
 
-ROOT = Path(__file__).resolve().parent.parent
+GRAPH_SETUP = Path(__file__).resolve().parent / "graph_setup.py"
+
+CONTRACT_REFERENCE = "contracts.MAX_GUESTS"
 
 
-def _load_demo04_rules():
-    path = ROOT / "04-neurosymbolic-demo" / "rules.py"
-    spec = importlib.util.spec_from_file_location("demo04_rules", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _max_guests_bindings(source: str, filename: str) -> list[ast.expr]:
+    """Return every expression bound to a `max_guests` name in `source`.
+
+    Covers both spellings `graph_setup.py` uses: the `max_guests=` keyword
+    argument on the rule-seeding query, and the `"max_guests"` key of the
+    expected-value mapping the readiness check compares against.
+    """
+    bindings: list[ast.expr] = []
+    for node in ast.walk(ast.parse(source, filename=filename)):
+        if isinstance(node, ast.Call):
+            bindings.extend(
+                keyword.value
+                for keyword in node.keywords
+                if keyword.arg == "max_guests"
+            )
+        elif isinstance(node, ast.Dict):
+            bindings.extend(
+                value
+                for key, value in zip(node.keys, node.values)
+                if isinstance(key, ast.Constant) and key.value == "max_guests"
+            )
+    return bindings
 
 
-def _assignment(path: Path, name: str) -> int:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
-            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
-                return node.value.value
-    raise AssertionError(f"Integer assignment {name} not found in {path}")
-
-
-class CrossDemoGuestConsistencyTests(unittest.TestCase):
-    def test_demos_share_limit_and_over_limit_scenario(self):
-        demo04_rules = _load_demo04_rules()
-        demo04_scenarios = (
-            ROOT / "04-neurosymbolic-demo" / "demo_neurosymbolic_hooks.py"
-        ).read_text(encoding="utf-8")
-        demo05_path = ROOT / "05-steering-demo" / "demo_hooks_vs_control.py"
-
-        self.assertTrue(demo04_rules.max_guests_check({"guests": 10}))
-        self.assertFalse(demo04_rules.max_guests_check({"guests": 11}))
-        self.assertIn("for 15 people", demo04_scenarios)
-
-        self.assertEqual(_assignment(demo05_path, "GUESTS"), 15)
-        demo05_source = demo05_path.read_text(encoding="utf-8")
-        self.assertIn("if guests > 10:", demo05_source)
-
+class GuestLimitConsistencyTests(unittest.TestCase):
+    def test_over_limit_scenario_exceeds_the_limit(self):
         self.assertEqual(contracts.MAX_GUESTS, 10)
         self.assertEqual(contracts.OVER_LIMIT_GUESTS, 15)
+        self.assertGreater(contracts.OVER_LIMIT_GUESTS, contracts.MAX_GUESTS)
 
-        # Outcomes intentionally differ: Demo 04 blocks, Demo 05 can steer,
-        # and Demo 06 returns a visible policy rejection. This test couples
-        # only their common policy input and threshold.
+    def test_graph_setup_seeds_the_rule_from_the_contract(self):
+        source = GRAPH_SETUP.read_text(encoding="utf-8")
+        bindings = _max_guests_bindings(source, str(GRAPH_SETUP))
+
+        self.assertTrue(
+            bindings,
+            f"No max_guests binding found in {GRAPH_SETUP.name}. The rule is "
+            "either no longer seeded or is spelled a third way.",
+        )
+        for binding in bindings:
+            self.assertEqual(
+                ast.unparse(binding),
+                CONTRACT_REFERENCE,
+                f"{GRAPH_SETUP.name} line {binding.lineno} binds max_guests to "
+                f"{ast.unparse(binding)!r} instead of {CONTRACT_REFERENCE}. A "
+                "literal here lets the seeded rule drift from the limit the "
+                "reservation command enforces.",
+            )
 
 
 if __name__ == "__main__":

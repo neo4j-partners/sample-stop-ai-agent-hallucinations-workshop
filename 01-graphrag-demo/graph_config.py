@@ -3,8 +3,7 @@
 """Shared configuration for the Graph-RAG demo.
 
 Holds the three things `build_graph.py`, `build_graph_lite.py`,
-`load_vector_data_lite.py`, `travel_agent_demo.py` and `test_graphrag.ipynb`
-must agree on:
+`prepare_graph.py` and `retrieval_patterns.ipynb` must agree on:
 
 1. The **pinned extraction schema**. Without it `SimpleKGPipeline` lets the LLM
    invent a fresh set of labels for every chunk, so one document yields

@@ -97,7 +97,6 @@ CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILES = [
     str(_REPO_ROOT / "06-agentcore-boto3-demo" / ".bedrock_agentcore.yaml"),
-    str(_REPO_ROOT / "07-agentcore-memory-demo" / ".bedrock_agentcore.yaml"),
 ]
 
 

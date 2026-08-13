@@ -12,15 +12,11 @@
 #     "numpy>=1.24.0",
 #     "neo4j>=5.28.0",
 #     "neo4j-graphrag>=1.18.0",
-#     "faiss-cpu>=1.9.0",
 #     "python-dotenv>=1.0.1",
-#     "agent-control-sdk>=0.0.1",
 #     "pyyaml>=6.0",
 #     "bedrock-agentcore-starter-toolkit",
 #     # Demo 08 (Neo4j graph memory; the notebook self-skips when unconfigured)
 #     "neo4j-agent-memory[bedrock]==0.5.0",
-#     # Demo 09 (Neo4j MCP client; the notebook self-skips when unconfigured)
-#     "mcp>=1.8.0",
 # ]
 # ///
 """Execute the workshop notebooks without modifying their source files.
@@ -88,52 +84,15 @@ NOTEBOOKS = (
     ),
     Notebook(
         "1",
-        REPO_ROOT / "01-graphrag-demo" / "test_graphrag.ipynb",
-    ),
-    Notebook(
-        "1",
         REPO_ROOT / "01-graphrag-demo" / "retrieval_patterns.ipynb",
-    ),
-    Notebook(
-        "2",
-        REPO_ROOT
-        / "02-semantic-tools-demo"
-        / "token_efficiency_analysis.ipynb",
-    ),
-    Notebook(
-        "3",
-        REPO_ROOT
-        / "03-multiagent-demo"
-        / "test_multiagent_hallucinations.ipynb",
-    ),
-    Notebook(
-        "4",
-        REPO_ROOT
-        / "04-neurosymbolic-demo"
-        / "test_neurosymbolic_hooks.ipynb",
-    ),
-    Notebook(
-        "5",
-        REPO_ROOT / "05-steering-demo" / "test_hooks_vs_control.ipynb",
     ),
     Notebook(
         "6",
         REPO_ROOT / "06-agentcore-boto3-demo" / "01_hybrid_retrieval.ipynb",
     ),
     Notebook(
-        "7",
-        REPO_ROOT
-        / "07-agentcore-memory-demo"
-        / "deploy_memory_agent.ipynb",
-        deploys_resources=True,
-    ),
-    Notebook(
         "8",
         REPO_ROOT / "08-neo4j-memory-demo" / "inspectable_memory.ipynb",
-    ),
-    Notebook(
-        "9",
-        REPO_ROOT / "09-neo4j-mcp-demo" / "mcp_text2cypher.ipynb",
     ),
     Notebook(
         "10",
