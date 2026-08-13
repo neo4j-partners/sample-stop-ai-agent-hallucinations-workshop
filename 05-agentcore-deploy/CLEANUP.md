@@ -1,12 +1,15 @@
-# Module 10: Cleanup
+# Lab 5 Teardown Reference
 
-Delete the resources created in Modules 6 and 7.
+Delete the AWS resources that `5.1_agentcore_deploy.ipynb` created. Long-form reasoning and incident
+history for `workshop_cleanup.py`; the lab README has the short version.
 
 **At a Glance**
-- **What it covers:** safe teardown of the AWS resources the workshop created.
-- **Neo4j:** the Aura database is terminated separately, not by this module.
-- **AWS:** deletes the tagged resources from Demos 06 and 07.
-- **You'll build:** a dry-run-by-default cleanup that only deletes with an explicit flag.
+- **What it covers:** safe teardown of the AWS resources Lab 5 created.
+- **Neo4j:** the Aura instance is deleted separately, not by this script.
+- **AWS:** deletes what carries `WorkshopResource=stop-ai-agent-hallucinations`, which is the Runtime,
+  ECR repository and CodeBuild project from `5.1_agentcore_deploy.ipynb`, plus tagged leftovers from
+  earlier versions of this workshop.
+- **What you run:** a dry-run-by-default cleanup that only deletes with an explicit flag.
 
 ## How to Run
 
@@ -16,28 +19,57 @@ python workshop_cleanup.py --dry-run   # the same read-only run, made explicit
 python workshop_cleanup.py --yes       # execute it and delete the tagged resources
 ```
 
-The default is a dry run. Deletion happens only when you pass `--yes`, so running the script with no
-arguments never deletes anything.
+Run these from `05-agentcore-deploy/`. The default is a dry run. Deletion happens only when you pass
+`--yes`, so running the script with no arguments never deletes anything.
 
-Or open `cleanup.ipynb`, which runs the same code and shows the dry run before it deletes anything.
-`../06-agentcore-boto3-demo/cleanup.py` is a thin wrapper around the same module, so there is exactly
-one teardown path to audit.
+Or open `5.2_teardown.ipynb`, which imports the same module and shows the dry run before it deletes
+anything. `workshop_cleanup.py` is the one teardown implementation, so there is exactly one path to
+audit.
 
 Both exit **non-zero** if the teardown is incomplete, so they are safe to call from a script.
 
+## This Is Only Half of Teardown
+
+Two scripts own two halves of Lab 5's infrastructure, under two different owner tags:
+
+| Owner | Tag | What it deletes |
+|-------|-----|-----------------|
+| `workshop_cleanup.py` and `5.2_teardown.ipynb` | `WorkshopResource=stop-ai-agent-hallucinations` | What `5.1_agentcore_deploy.ipynb` created: the AgentCore Runtime, its ECR repository, and its CodeBuild project |
+| `setup/provision_agentcore.py teardown` | `demo06-agentcore=true` | What provisioning created: the AgentCore Gateway and its target, the reservation Lambda, the Neo4j command secret, and the three `demo06-*` IAM roles |
+
+Run both. Either one alone leaves the other half billing. From the repository root:
+
+```bash
+uv run setup/provision_agentcore.py status
+uv run setup/provision_agentcore.py teardown
+```
+
+Neither script touches the other's resources, because each gates on its own tag.
+
 ## What Gets Deleted
+
+Lab 5 as it ships creates three AWS resources and one local file:
 
 | Resource Type | Count | Description |
 |--------------|-------|-------------|
-| AgentCore Runtimes | 2 | HotelBookingAgent + HotelBookingAgentWithMemory |
-| AgentCore Gateway | 1 | HotelBookingGateway with its Lambda targets |
-| AgentCore Memory | 1 | workshop_HotelBookingMemory |
-| Lambda Functions | 8 | 7 booking tools + 1 Neo4j query |
-| Lambda Layer | 1 | Neo4j Python driver |
-| DynamoDB Tables | 3 | Hotels, Bookings, SteeringRules |
-| IAM Roles | 2 | Lambda + AgentCore execution roles |
-| ECR Repositories | 2 | Container images for both agents |
-| CodeBuild Projects | 2 | Build projects from the starter toolkit |
+| AgentCore Runtime | 1 | `HotelBookingAgent`, tagged by Step 5 of `5.1_agentcore_deploy.ipynb` |
+| ECR Repository | 1 | `bedrock-agentcore-hotelbookingagent`, holding the Runtime image |
+| CodeBuild Project | 1 | `bedrock-agentcore-hotelbookingagent-builder`, from the starter toolkit |
+| Local config file | 1 | `deployment-tools/.bedrock_agentcore.yaml`, written by the starter toolkit |
+
+`workshop_cleanup.py` also enumerates the resources earlier versions of this workshop created, so an
+account that ran one of them is cleaned up by the same tag-gated path. On a fresh Lab 5 run every one
+of these prints as `not found` and nothing happens:
+
+| Resource Type | Count | Description |
+|--------------|-------|-------------|
+| AgentCore Runtime | 1 | `HotelBookingAgentWithMemory`, and its ECR repository and CodeBuild project |
+| AgentCore Gateway | 1 | `HotelBookingGateway` with its Lambda targets |
+| AgentCore Memory | 1 | `workshop_HotelBookingMemory` |
+| Lambda Functions | 8 | 7 booking tools + 1 Neo4j query, all named `hotel-booking-*` |
+| Lambda Layer | 1 | `workshop-neo4j-driver`, the Neo4j Python driver |
+| DynamoDB Tables | 3 | `workshop-Hotels`, `workshop-Bookings`, `workshop-SteeringRules` |
+| IAM Roles | 2 | `workshop-LambdaExecutionRole`, `workshop-AgentCoreExecutionRole` |
 
 ...but only the ones carrying the workshop tag. See below.
 
@@ -49,8 +81,10 @@ Every resource is deleted on one condition: it carries
 WorkshopResource=stop-ai-agent-hallucinations
 ```
 
-Nothing is selected by name prefix. Module 6 and 7 apply this tag at creation; cleanup deletes only
-what is tagged.
+Nothing is selected by name prefix. Step 5 of `5.1_agentcore_deploy.ipynb` applies this tag right
+after deploy, because the starter toolkit does not forward tags to the Runtime, ECR repository, or
+CodeBuild project it creates. Cleanup deletes only what is tagged, so skipping that step leaves
+billable infrastructure that teardown refuses to remove.
 
 **Why this matters.** An earlier version of this teardown selected IAM roles like so:
 
@@ -77,11 +111,13 @@ or delete it by hand once you have confirmed it is yours.
 
 ### An untagged workshop role blocks cleanup
 
-If an IAM role carries a workshop name (`workshop-LambdaExecutionRole` or
-`workshop-AgentCoreExecutionRole`) but no workshop tag, cleanup reports it under `BLOCKED` and exits 1
+If an IAM role carries a workshop name, `workshop-LambdaExecutionRole` or
+`workshop-AgentCoreExecutionRole`, but no workshop tag, cleanup reports it under `BLOCKED` and exits 1
 without deleting it. This is the same safety rule above, applied to roles. It affects anyone who
-deployed Modules 6 or 7 before tagging landed (bug B20): those roles were created without the
-`WorkshopResource` tag, so the current teardown refuses to remove them.
+deployed an earlier version of this workshop before tagging landed, bug B20: those roles were created
+without the `WorkshopResource` tag, so the current teardown refuses to remove them.
+
+Lab 5 as it ships creates neither role, so on a fresh run both are reported `not found`.
 
 There are two ways to clear the block. Pick one.
 
@@ -119,7 +155,7 @@ here so you can recognize them:
 `UNTAGGABLE_KINDS` in `workshop_cleanup.py` lists the only things matched directly rather than by tag:
 
 - **Lambda layer versions.** AWS does not support tags on them, so they are matched by exact name.
-- **Local `.bedrock_agentcore.yaml` config files.** Not AWS resources. They are matched by fixed repo-relative path, one per demo directory, never by glob.
+- **Local `.bedrock_agentcore.yaml` config files.** Not AWS resources. They are matched by fixed repo-relative path, never by glob. `CONFIG_FILES` holds two exact paths, `05-agentcore-deploy/deployment-tools/.bedrock_agentcore.yaml`, which is where `5.1_agentcore_deploy.ipynb` runs the toolkit from, and `05-agentcore-deploy/.bedrock_agentcore.yaml`, kept so a stale file from the earlier flat layout is still cleaned up. An earlier version globbed `~/.bedrock_agentcore*.yaml` and destroyed unrelated local config belonging to other AgentCore projects on the same machine, bug B45.
 
 Both are matched exactly, never by prefix or glob. A unit test pins the contents of that set so the
 exemption cannot quietly grow.
@@ -128,7 +164,7 @@ exemption cannot quietly grow.
 
 No exception is swallowed. The previous version hid a `KeyError` behind a bare `except`, printed a
 clean bill of health, and left a billable AgentCore Memory resource running. The `KeyError` came from
-reading `m["memoryName"]` in `list_memories()` output — that field does not exist. `MemorySummary`
+reading `m["memoryName"]` in `list_memories()` output; that field does not exist. `MemorySummary`
 is `arn, id, status, createdAt, updatedAt, managedByResourceArn`, and the memory is matched on `id`,
 which has the form `<name>-<suffix>`.
 
@@ -137,19 +173,29 @@ Any delete that fails, and any untagged workshop resource found, produces a non-
 ## Tests
 
 ```bash
-python -m unittest discover -s . -v
+cd 05-agentcore-deploy
+uv run --with pytest --with-requirements requirements.txt -m pytest test_workshop_cleanup.py
 ```
 
-18 tests, no AWS credentials needed. The clients are injected fakes. The headline test is
-`test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape that
-bug B6 damaged and asserts none of those roles is selected.
+20 tests in `test_workshop_cleanup.py`, no AWS credentials needed. The clients are injected fakes. The
+headline test is `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account
+shape that bug B6 damaged and asserts none of those roles is selected.
+
+Name the file explicitly. A bare `pytest` from this directory also collects
+`deployment-tools/test_runtime_integration.py`, which imports `bedrock_agentcore` and `strands` and
+only runs inside the deployed Runtime image, so collection errors out before the 20 tests report.
 
 ## What Does NOT Get Deleted
 
-- **Neo4j infrastructure** — Code Editor EC2 or the Central Neo4j ECS stack from Module 1.
-  Delete via AWS Console → CloudFormation → Delete Stack.
-- **CloudWatch log groups** — retained so you can review the run.
-- **The starter toolkit's shared CodeBuild role** (`AmazonBedrockAgentCoreSDKCodeBuild-*`). It is
+- **Whatever `setup/provision_agentcore.py` created.** The Gateway and its target, the reservation
+  Lambda, the Neo4j command secret, and the three `demo06-*` IAM roles carry a different owner tag,
+  `demo06-agentcore=true`. Run `uv run setup/provision_agentcore.py teardown` from the repository root.
+- **Your Aura instance and the graph Lab 1 built.** Neo4j Aura is not an AWS resource in your account,
+  so nothing here can reach it. Delete the instance from the Aura console.
+- **Neo4j infrastructure in the hosted environment.** The Code Editor EC2 instance and the Central
+  Neo4j ECS stack come from CloudFormation. Delete via AWS Console, CloudFormation, Delete Stack.
+- **CloudWatch log groups.** Retained so you can review the run.
+- **The starter toolkit's shared CodeBuild role, `AmazonBedrockAgentCoreSDKCodeBuild-*`.** It is
   created by the toolkit, shared across projects, and costs nothing. Deleting it is what caused the
   original incident. If you want it gone, remove it by hand.
 - **Anything untagged.**
@@ -162,13 +208,14 @@ cleanup, because deleting graph data from a database that is about to be termina
 failure modes without reclaiming anything. Workshop ownership markers on graph records are left in
 place for provenance.
 
-AgentCore Memory teardown, by contrast, stays part of this cleanup: environments that ran Module 7
-created `workshop_HotelBookingMemory`, and it is deleted through the same tag-gated path listed in
-the table above.
+Lab 6's agent memory is also graph-native, stored in Neo4j rather than in AgentCore Memory, so it goes
+away with the database and nothing here touches it. AgentCore Memory teardown stays in this cleanup for
+one reason: an earlier version of this workshop created `workshop_HotelBookingMemory`, and it is
+deleted through the same tag-gated path listed in the legacy table above.
 
 ## Reclaiming Resources From a Run Before Tagging Existed
 
-Earlier versions of Modules 6 and 7 created resources without tagging them. Cleanup will refuse to
+Earlier versions of this workshop created resources without tagging them. Cleanup will refuse to
 delete those, correctly: it cannot prove it created them. If you ran this workshop before, you may be
 paying for orphans that this script reports and then leaves alone.
 
@@ -214,9 +261,11 @@ Only do this for resources you have confirmed came from this workshop. Tagging s
 ownership, and the next cleanup run will act on it.
 
 **What you will probably find.** The starter toolkit's shared `AmazonBedrockAgentCoreSDKCodeBuild-*`
-role and its `bedrock-agentcore-*-builder` CodeBuild projects survive teardown by design. They cost
-nothing, they are shared across projects, and deleting the role is what caused the original incident.
-Leaving them is the right outcome.
+role survives teardown by design. It costs nothing, it is shared across projects, and deleting it is
+what caused the original incident. Leaving it is the right outcome. A `bedrock-agentcore-*-builder`
+CodeBuild project is different: `5.1_agentcore_deploy.ipynb` tags the one it creates, so teardown
+deletes it. Only an untagged builder project from an older run survives, and that one is reported
+`BLOCKED` rather than removed.
 
 ## Estimated Time
 

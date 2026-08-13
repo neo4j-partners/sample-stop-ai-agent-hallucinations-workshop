@@ -4,3 +4,10 @@ aws-opentelemetry-distro>=0.7.0
 boto3>=1.35.0
 neo4j>=6.0.0,<7.0.0
 neo4j-graphrag==1.18.0
+
+# The shared package `booking_agent.py` imports, built into vendor/ by
+# 5.1_agentcore_deploy.ipynb immediately before launch. The filename is pinned
+# rather than resolved by name: a bare `workshop` requirement would let the
+# resolver reach PyPI for an unrelated package of the same name. See
+# vendor/README.md.
+./vendor/workshop-0.1.0-py3-none-any.whl

@@ -1,36 +1,38 @@
-[< Back to Demo 06](../README.md)
+[< Back to Lab 5](../README.md)
 
-# Demo 06 Advanced Deployment (Reference Only)
+# Lab 5 reference material
 
-This folder holds reference material for the Amazon Bedrock AgentCore deployment of
-Demo 06. **Nothing here is run by the workshop in the current pass, and nothing
-automated reads it.** It is retained for AWS review and for facilitators who want to
-understand the deployed shape.
-
-The self-contained local notebook one level up,
-[`../01_hybrid_retrieval.ipynb`](../01_hybrid_retrieval.ipynb), already proves the
-full anti-hallucination story (grounded retrieval, abstention, rule rejection, and
-the idempotent reservation write) against your own Neo4j Aura and Amazon Bedrock,
-with no AWS deployment.
+This folder holds reference material for the Amazon Bedrock AgentCore
+deployment. **Nothing here is run by the workshop, and the notebook runner does
+not read it.** It is retained for AWS review, and as the source the shipped Lab 5
+notebooks were authored from.
 
 ## What is here
 
 | File | Role |
 |------|------|
-| `02_agentcore_walkthrough.ipynb` | Facilitator notebook that invokes and inspects a pre-deployed AgentCore Runtime, Gateway, and reservation Lambda, with CloudWatch and `request_id` log correlation and Neo4j graph inspection |
-| `DEPLOYMENT.md` | The deployable boundary described for production hardening. It deliberately describes two Neo4j users and a separate Runtime-read secret, which is stronger than the stand-alone path's one user and environment-variable read |
+| `02_agentcore_walkthrough.ipynb` | The source `5.3_agentcore_walkthrough.ipynb` was authored from. It assumed a facilitator pointing at a pre-deployed Runtime. Run [`../5.3_agentcore_walkthrough.ipynb`](../5.3_agentcore_walkthrough.ipynb) instead |
+| `DEPLOYMENT.md` | The deployable boundary described for production hardening. It deliberately describes two Neo4j users and a separate Runtime-read secret, which is stronger than the one user and environment-variable read this lab deploys |
 
-The live, deployable source (the Runtime entry point, container, Gateway target
-manifest, and reservation Lambda) lives one level over in
-[`../deployment-tools/`](../deployment-tools/). That is the folder the stand-alone
-provisioning script consumes.
+The deployable source, the Runtime entry point, container, Gateway target
+manifest, and reservation Lambda, lives one level over in
+[`../deployment-tools/`](../deployment-tools/). That is the folder
+`provision_agentcore.py` consumes and the one the container is built from.
 
-## Running the walkthrough
+## What changed in `5.3`
 
-`02_agentcore_walkthrough.ipynb` reads a manually-set `AGENT_RUNTIME_ARN`. The
-stand-alone provisioning path writes `AGENTCORE_GATEWAY_URL` and
-`AGENTCORE_RUNTIME_ROLE_ARN` to the root `.env` but does not write
-`AGENT_RUNTIME_ARN`, so a facilitator must fill that value in by hand after a
-Runtime exists. The local test run excludes this folder, and the deferred
-deployment tests run only in the deployment environment with the AgentCore
-dependencies installed.
+`5.3_agentcore_walkthrough.ipynb` keeps the five sections and the log-correlation
+query from this notebook, and differs in three ways:
+
+- **It follows a deploy the participant ran.** `5.1_agentcore_deploy.ipynb`
+  deploys the Runtime and prints its ARN, so the walkthrough no longer assumes a
+  facilitator provisioned one out of band.
+- **Its dates are computed from today.** The original hardcoded a check-in of
+  `2026-09-04`. A fixed future date rots into the past, which turns a passing
+  stay into a rejected one and breaks the scenario the notebook claims to run.
+- **Each invocation carries its own session ID.** The `request_id`, not the
+  session, is what ties two deliveries of one reservation request together.
+
+`5.3` reads `AGENT_RUNTIME_ARN`, which `5.1` prints and which
+`provision_agentcore.py` does not write to the root `.env`. Set it by hand, or
+every live cell skips.

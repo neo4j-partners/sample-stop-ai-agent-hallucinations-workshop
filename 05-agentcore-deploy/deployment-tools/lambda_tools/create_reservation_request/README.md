@@ -1,9 +1,11 @@
 # Reservation-request Lambda
 
-This is the only Lambda command in Demo 06. Its deployment package includes
-`reservation_command.py`, `contracts.py`, the Neo4j driver, and this entry
-point. Set `NEO4J_COMMAND_SECRET_ID` to a secret containing `uri`, `username`,
-`password`, and `database`.
+This is the only Lambda command in the workshop. `lambda_function.py` re-exports
+`workshop.reservation_command.handler`, the same function Lab 4 runs locally. Its
+deployment package installs the shared `workshop` package and the Neo4j driver,
+then places this entry point at the zip root; `build_lambda_zip` in
+`setup/provision_agentcore.py` builds it. Set `NEO4J_COMMAND_SECRET_ID` to a
+secret containing `uri`, `username`, `password`, and `database`.
 
 Use a separate Neo4j command user when the Aura tier supports custom users and
 roles. Its effective access is limited to:

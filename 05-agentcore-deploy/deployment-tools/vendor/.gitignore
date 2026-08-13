@@ -1,0 +1,7 @@
+# The wheel here is a build artifact, not source. 5.1_agentcore_deploy.ipynb
+# rebuilds it from ../../workshop before every launch, so it is never committed.
+# The directory itself is tracked, because the Dockerfile copies it and a
+# missing directory fails the image build before the install line is reached.
+*.whl
+!.gitignore
+!README.md

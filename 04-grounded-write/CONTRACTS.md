@@ -1,7 +1,8 @@
-# Demo 06 Frozen Contracts
+# Frozen contracts
 
-These contracts are shared by participant-local retrieval and the facilitator's
-pre-deployed production walkthrough. Nothing in this file deploys AWS resources.
+These contracts are shared by the local retrieval and write path Lab 4 runs and
+the deployed Runtime, Gateway, and Lambda Lab 5 stands up. Nothing in this file
+deploys AWS resources.
 
 ## Hotel retrieval
 
@@ -32,9 +33,11 @@ The command accepts exactly `request_id`, `hotel_id`, `check_in`, `check_out`,
 and `guests`. The caller creates a UUID and reuses it for retries. There is no
 actor or guest identity field. Dates use `YYYY-MM-DD`.
 
-The committed Gateway manifest uses the smaller JSON Schema subset accepted by
-AgentCore. The Lambda still enforces the full closed schema, canonical UUID,
-strict date format, and positive guest count at the command boundary.
+The committed Gateway manifest,
+`05-agentcore-deploy/deployment-tools/gateway_target.json`, uses the smaller JSON
+Schema subset accepted by AgentCore. The Lambda still enforces the full closed
+schema, canonical UUID, strict date format, and positive guest count at the
+command boundary.
 
 Responses have one of these stable outcomes:
 
@@ -53,9 +56,10 @@ Every response contains `status`, `request_id`, `hotel_id`, `duplicate`, and
 `reason_code`. Rejections and errors contain `reason_code`; only the
 maximum-guests rejection also contains `max_guests`.
 
-Only a hotel with a stable ID from the committed Demo 06 fixture manifest can
-be selected. Check-in cannot be in the past, check-out must be after check-in,
-and the enabled Neo4j rule limits the request to 10 guests.
+Only a hotel with a stable ID from the committed fixture manifest at
+`workshop/src/workshop/fixtures/hotel_ids.json` can be selected. Check-in cannot
+be in the past, check-out must be after check-in, and the enabled Neo4j rule
+limits the request to 10 guests.
 
 An accepted request persists `status=accepted` and a Neo4j-generated
 `created_at` timestamp. The response returns that timestamp. A repeat delivery
@@ -74,15 +78,19 @@ opaque ID. It never treats a generated hotel name as identity.
 The retrieval credential can read chunk search indexes and traverse from a
 matched chunk to connected hotel and amenity data. It cannot write.
 
-The command credential can read the Demo 06 maximum-guests rule, match a
+The command credential can read the `demo-06-maximum-guests` rule, match a
 fixture hotel by stable ID, and create a workshop-owned `ReservationRequest`
 plus its `FOR_HOTEL` relationship. It cannot update canonical hotel facts.
 
-Demo-owned rule and request nodes carry `workshop_owner=neo4j-ftw-demo-6`.
+Workshop-owned rule and request nodes carry `workshop_owner=neo4j-ftw-demo-6`.
 `request_id` is the correlation identifier in application logs. Passwords,
 secret values, and complete connection strings must never be logged.
 
-Local code reads `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and
-`NEO4J_DATABASE`. Deployable Runtime and command code use separate
-`NEO4J_READ_SECRET_ID` and `NEO4J_COMMAND_SECRET_ID` values. Each referenced
-secret contains `uri`, `username`, `password`, and `database`.
+Local code and the Runtime Lab 5 deploys read `NEO4J_URI`, `NEO4J_USERNAME`,
+`NEO4J_PASSWORD`, and `NEO4J_DATABASE`. The reservation Lambda reads
+`NEO4J_COMMAND_SECRET_ID`. `workshop.hybrid_retrieval` also honors
+`NEO4J_READ_SECRET_ID` when it is set, which is the two-credential production
+form in
+[`../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md`](../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md)
+rather than what Lab 5 deploys. Each referenced secret contains `uri`,
+`username`, `password`, and `database`.

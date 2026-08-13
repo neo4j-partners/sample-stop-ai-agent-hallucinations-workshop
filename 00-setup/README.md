@@ -1,212 +1,173 @@
 [< Back to Main README](../README.md)
 
-# Build AI Agents with Strands Agents and Amazon Bedrock: Workshop Primer
+# Lab 0: Setup
 
-Get up and running with [Strands Agents](https://strandsagents.com) in under 30 minutes. This notebook covers every core concept used throughout the workshop — agents, tools, lifecycle hooks, and multi-agent swarms — with runnable examples and real explanations.
+Two credentials carry the whole workshop: one Neo4j Aura instance and one AWS account with Amazon Bedrock access. Get both working here and every later lab runs without a credential detour.
 
-[![Python](https://img.shields.io/badge/Python-3.9+-green.svg?style=flat)](https://python.org)
-[![Strands Agents](https://img.shields.io/badge/Strands_Agents-1.27+-00B4D8.svg?style=flat)](https://strandsagents.com)
-[![Amazon Bedrock](https://img.shields.io/badge/Amazon-Bedrock-FF9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/)
-
-> **Already familiar with Strands Agents?** Skip to [`01-graphrag-demo/`](../01-graphrag-demo/) and come back here if you need a refresher on hooks or swarms.
+Lab 0 has no notebook and nothing to install. It is a checklist that ends in one verification command.
 
 **At a Glance**
-- **What it covers:** the Strands Agents concepts every later demo uses.
-- **Neo4j:** not used yet; this module is the framework primer.
-- **AWS:** Amazon Bedrock runs the agents and tools.
-- **You'll build:** small runnable agents, tools, lifecycle hooks, and a multi-agent swarm.
-
----
-
-## What This Notebook Covers
-
-| Concept | What it does | Used in |
-|---------|-------------|---------|
-| `Agent` + system prompt | Creates an LLM-powered agent that reasons and acts | All demos |
-| Model providers | Switch between Bedrock, Anthropic, Ollama, or any OpenAI-compatible endpoint | All demos |
-| `@tool` decorator | Expose Python functions as tools the agent can call | All demos |
-| `BeforeToolCallEvent` + `cancel_tool` | Block tool calls that violate rules — LLM cannot bypass | Demos 04, 05, 06 |
-| `Swarm` | Multi-agent handoff chain (Executor → Validator → Critic) | Demo 03 |
-
----
+- **Neo4j:** one Aura instance with the APOC plugin enabled, serving all six labs.
+- **AWS:** Bedrock model access for `us.anthropic.claude-sonnet-5` and `amazon.nova-2-multimodal-embeddings-v1:0`.
+- **You'll end with:** one `.env` file at the repository root and one command that proves both credentials work.
 
 ## Prerequisites
 
-- Python 3.9+
-- [uv](https://docs.astral.sh/uv/) package manager
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+- An AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access
+- A Neo4j Aura account, or the instance details handed out at a hosted workshop
 
-**At an AWS event:** AWS credentials and dependencies are pre-configured. Run the first notebook cell as-is — no setup needed.
+---
 
-**Self-paced:** Configure your AWS credentials and enable Bedrock model access:
+## Step 1: Get a Neo4j Aura instance
+
+One Aura instance serves every lab. It holds the hotel knowledge graph, the vector and full-text indexes, the `max_guests` production rule, the reservation requests, and the optional memory graph.
+
+**At a hosted workshop:** an instance is provided. Collect the URI, the username, and the password from the event materials and skip to Step 2.
+
+**Self-paced:**
+
+1. Go to [console.neo4j.io](https://console.neo4j.io) and create a free **AuraDB** instance.
+2. Download the credentials file when prompted. It holds the connection URI, the username, and the generated password. The password is shown once, so save the file.
+3. Wait for the instance to report **Running**.
+4. Enable the **APOC** plugin in the instance settings. Lab 1's graph build depends on it.
+
+The graph itself is empty at this point. Lab 1 builds it: roughly 15 minutes for the 30-document lite corpus, or 2 hours for the full 300.
+
+## Step 2: Write the repo-root `.env`
+
+Copy the template once, from the repository root:
 
 ```bash
-aws configure   # or set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
+cp .env.example .env
 ```
 
-Then enable the model in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) (`us.anthropic.claude-sonnet-5` or equivalent).
+Then fill in these five values:
 
----
+| Variable | Value |
+|---|---|
+| `NEO4J_URI` | `neo4j+s://<your-instance>.databases.neo4j.io` from the credentials file. The template ships a `bolt://localhost:7687` placeholder, so this one always needs replacing |
+| `NEO4J_USERNAME` | `neo4j` on a default Aura instance |
+| `NEO4J_PASSWORD` | the generated password from the credentials file |
+| `NEO4J_DATABASE` | `neo4j` |
+| `AWS_REGION` | a region where both Bedrock models are enabled. The template ships `us-east-1` |
 
-## Quick Start
+Every lab loads the nearest `.env` first, so a `.env` inside a lab folder overrides this one. Keeping a single file at the repository root is the simplest arrangement. `.env` is gitignored; keep it that way.
+
+> **Workshop Studio username variable.** The hosted CloudFormation environment writes `NEO4J_USER`, and every lab in this repository reads `NEO4J_USERNAME`. If authentication fails only inside the hosted workshop, this mismatch is the first thing to check. Set `NEO4J_USERNAME` to the same value.
+
+## Step 3: Confirm Bedrock access
+
+AWS credentials come first. At a hosted workshop they are already configured; self-paced participants run `aws configure` or export `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Confirm the identity the SDK will use, from the repository root:
 
 ```bash
-cd 00-getting-started
-uv venv && uv pip install -r requirements.txt
+aws sts get-caller-identity --query Arn --output text
 ```
 
-Open `getting_started_strands.ipynb` in your IDE (VS Code, Kiro, or any editor with notebook support) and run the cells in order.
+Then open the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) in the region named by `AWS_REGION` and request access to both models:
 
----
+| Model ID | Used for |
+|---|---|
+| `us.anthropic.claude-sonnet-5` | Lab 1 entity and relationship extraction, then agent reasoning in Labs 2 through 5 |
+| `amazon.nova-2-multimodal-embeddings-v1:0` | Lab 1 chunk embeddings and every Lab 2 query embedding, at 1024 dimensions |
 
-## How It Works
+The `us.` prefix marks a cross-region inference profile, so pair it with a US region such as `us-east-1`. Access is granted per region: enabling a model in one region does nothing for another.
 
-### 1. Creating an Agent
+## Step 4: Verify both credentials
 
-An agent combines an LLM with a system prompt and optional tools. [Amazon Bedrock](https://aws.amazon.com/bedrock/) is the default model provider. At an AWS event, credentials are pre-configured. Self-paced users need to configure AWS credentials first (see Prerequisites above).
+Run this from the repository root. It connects to Aura, counts APOC procedures, sends one short Bedrock prompt, and requests one embedding. It reads the graph and never writes to it, and it needs no virtual environment because `uv` fetches the three packages into a cached one:
 
-```python
-from strands import Agent
+```bash
+uv run --with neo4j --with boto3 --with python-dotenv python - <<'PY'
+import json, os, sys, boto3
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
 
-agent = Agent(
-    system_prompt="You are a helpful travel assistant.",
+load_dotenv(".env")
+os.environ.setdefault("NEO4J_USERNAME", os.environ.get("NEO4J_USER", ""))
+missing = [
+    name
+    for name in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "NEO4J_DATABASE", "AWS_REGION")
+    if not os.environ.get(name)
+]
+if missing:
+    sys.exit("Missing from .env: " + ", ".join(missing))
+
+uri, user = os.environ["NEO4J_URI"], os.environ["NEO4J_USERNAME"]
+database, region = os.environ["NEO4J_DATABASE"], os.environ["AWS_REGION"]
+
+with GraphDatabase.driver(uri, auth=(user, os.environ["NEO4J_PASSWORD"])) as driver:
+    driver.verify_connectivity()
+    with driver.session(database=database) as session:
+        apoc = session.run(
+            "SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'apoc.' RETURN count(*) AS n"
+        ).single()["n"]
+if apoc == 0:
+    sys.exit("Connected, but no APOC procedures are installed. Enable APOC on the instance.")
+print(f"Neo4j OK: {uri}, database {database}, {apoc} APOC procedures")
+
+bedrock = boto3.client("bedrock-runtime", region_name=region)
+bedrock.converse(
+    modelId="us.anthropic.claude-sonnet-5",
+    messages=[{"role": "user", "content": [{"text": "Reply with the word OK."}]}],
+    inferenceConfig={"maxTokens": 5},
 )
-response = agent("What should I consider when booking a hotel in Lisbon?")
-```
+print(f"Bedrock OK: us.anthropic.claude-sonnet-5 answered in {region}")
 
-To specify a model explicitly:
-
-```python
-agent = Agent(
-    model="us.anthropic.claude-sonnet-5",
-    system_prompt="You are a helpful assistant.",
+response = bedrock.invoke_model(
+    modelId="amazon.nova-2-multimodal-embeddings-v1:0",
+    body=json.dumps({
+        "taskType": "SINGLE_EMBEDDING",
+        "singleEmbeddingParams": {
+            "embeddingPurpose": "GENERIC_INDEX",
+            "embeddingDimension": 1024,
+            "text": {"truncationMode": "END", "value": "hotel amenities"},
+        },
+    }),
+    contentType="application/json",
+    accept="application/json",
 )
+vector = json.loads(response["body"].read())["embeddings"][0]["embedding"]
+print(f"Bedrock OK: nova-2-multimodal-embeddings returned {len(vector)} dimensions")
+PY
 ```
 
-See all supported providers: [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/)
+Three lines mean Lab 0 is done:
 
----
-
-### 2. Building Tools with `@tool`
-
-Tools are Python functions decorated with `@tool`. The agent reads the function name and **docstring** to decide when and how to call each tool.
-
-```python
-from strands import Agent, tool
-
-@tool
-def search_hotels(city: str, max_price: int = 500) -> str:
-    """Search for available hotels in a city under a maximum price per night."""
-    return f"Found hotels in {city} under ${max_price}/night..."
-
-agent = Agent(tools=[search_hotels], system_prompt="You are a booking assistant.")
-agent("Find hotels in Lisbon under $100")
+```
+Neo4j OK: neo4j+s://<your-instance>.databases.neo4j.io, database neo4j, 162 APOC procedures
+Bedrock OK: us.anthropic.claude-sonnet-5 answered in us-east-1
+Bedrock OK: nova-2-multimodal-embeddings returned 1024 dimensions
 ```
 
-> **Docstrings are critical.** The agent uses them to match user queries to tools. A vague docstring leads to wrong tool selection — Demo 02 demonstrates this in depth.
+The APOC count varies by Aura version. Any nonzero count is fine. The embedding dimension must read 1024, because that is the width Lab 1 writes into the vector index and Lab 2 queries against.
 
-See: [Strands Tools Documentation](https://strandsagents.com/docs/user-guide/concepts/tools/custom-tools/)
-
----
-
-### 3. Lifecycle Hooks — Enforcing Rules the LLM Cannot Bypass
-
-Hooks intercept the agent's execution at specific points. `BeforeToolCallEvent` fires after the LLM decides to call a tool but **before** the tool executes. Setting `event.cancel_tool` blocks the call entirely — the LLM receives the cancellation message instead of the tool result and cannot override it.
-
-```python
-from strands.hooks import HookProvider, HookRegistry
-from strands.hooks.events import BeforeToolCallEvent
-
-class MaxGuestsHook(HookProvider):
-    def register_hooks(self, registry: HookRegistry) -> None:
-        registry.add_callback(BeforeToolCallEvent, self.check)
-
-    def check(self, event: BeforeToolCallEvent) -> None:
-        if event.tool_use["name"] == "book_room":
-            guests = event.tool_use["input"].get("guests", 1)
-            if guests > 10:
-                event.cancel_tool = f"BLOCKED: {guests} guests exceeds maximum of 10"
-
-agent = Agent(tools=[book_room], hooks=[MaxGuestsHook()], ...)
-```
-
-This pattern is the foundation of Demos 04, 05, and 06. See: [Strands Hooks Documentation](https://strandsagents.com/docs/user-guide/concepts/agents/hooks/)
+The `NEO4J_USER` line in the script exists so the check still passes inside Workshop Studio. Labs 1 through 6 read `NEO4J_USERNAME` only, so set it properly rather than relying on that fallback.
 
 ---
 
-### 4. Multi-Agent Swarms
+## When the verification fails
 
-A swarm is a group of agents that hand off work to each other in sequence. Each agent has a specific role. Strands manages the handoff chain automatically.
+| Message | Fix |
+|---|---|
+| `Missing from .env: ...` | The named variables are absent or blank in the repo-root `.env`. Revisit Step 2 |
+| `Missing from .env: NEO4J_USERNAME` inside Workshop Studio | The hosted environment set `NEO4J_USER`. Add `NEO4J_USERNAME` with the same value |
+| `Connected, but no APOC procedures are installed` | Enable the APOC plugin in the Aura instance settings, then rerun |
+| `Neo4jError: ... AuthenticationRateLimit` or `Unauthorized` | The username or password is wrong. Re-read them from the downloaded credentials file |
+| `Unable to retrieve routing information` or a connection timeout | The URI is wrong, or the instance is paused. Confirm it reads **Running** in the Aura console and that the URI starts with `neo4j+s://` |
+| `AccessDeniedException` from Bedrock | The model is not enabled in `AWS_REGION`. Request access in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess) for that exact region |
+| `ValidationException` naming the model | The model ID is unavailable in that region. Switch `AWS_REGION` to a US region such as `us-east-1` |
+| `NoCredentialsError` or `ExpiredToken` | AWS credentials are missing or stale. Run `aws configure`, or refresh the SSO session, then rerun Step 3 |
 
-```python
-from strands.multiagent import Swarm
-
-executor  = Agent(name="Executor",  tools=[lookup_hotel], system_prompt="Look up hotel details.")
-validator = Agent(name="Validator", system_prompt="Verify if the response is consistent.")
-critic    = Agent(name="Critic",    system_prompt="Give a final verdict: VALID or SUSPICIOUS.")
-
-swarm = Swarm(agents=[executor, validator, critic], max_handoffs=5)
-swarm("What are the details for AnyCompany Lisbon Resort?")
-```
-
-See: [Strands Multi-Agent Documentation](https://strandsagents.com/docs/user-guide/concepts/multi-agent/)
+One more thing before opening a notebook: register the `nbstripout` git filter once per clone, described under [Notebook setup](../README.md#notebook-setup-nbstripout) in the main README. Without it every `.ipynb` checkout runs against an undefined filter.
 
 ---
 
-## Concepts Summary
+## Next
 
-| Concept | Why it matters for hallucination prevention |
-|---------|---------------------------------------------|
-| `@tool` + clear docstrings | Accurate tool selection reduces tool-mismatch hallucinations (Demo 02) |
-| `BeforeToolCallEvent` + `cancel_tool` | Enforces business rules the LLM cannot invent its way around (Demo 04) |
-| STEER messages in `cancel_tool` | Instead of blocking, guide the agent to self-correct (Demo 05) |
-| `Swarm` with Validator + Critic | Catches fabricated responses before they reach the user (Demo 03) |
-
----
-
-## Frequently Asked Questions
-
-### What is Strands Agents and how is it different from LangChain?
-
-[Strands Agents](https://strandsagents.com) is an open-source Python framework for building AI agents. It focuses on simplicity: a single `Agent` class, `@tool` decorator, and hook system. Similar patterns exist in [LangGraph](https://langchain-ai.github.io/langgraph/), [AutoGen](https://microsoft.github.io/autogen/), and [CrewAI](https://www.crewai.com/) — the workshop concepts (tool calling, guardrails, multi-agent validation) apply to all of them.
-
-### Why does the docstring matter for tool selection?
-
-The agent uses the function name and docstring as the tool's description when deciding which tool to call. If two tools have similar or vague docstrings, the agent may pick the wrong one. Demo 02 measures this problem quantitatively (89% token reduction with semantic filtering) and shows how to fix it.
-
-### Do I need an AWS account to run this notebook?
-
-Yes, if running self-paced. You need an AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access and the model enabled in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess). At an AWS event, the account and credentials are provided — no setup required.
-
-### Can I use a different LLM provider?
-
-Yes. Change the `model` parameter to use any provider supported by Strands Agents: Anthropic API directly, Ollama (local models), or any OpenAI-compatible endpoint. See [Strands Model Providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/) for configuration details.
-
-### What is `cancel_tool` and how is it different from a prompt instruction?
-
-`cancel_tool` is a framework-level block set in a `BeforeToolCallEvent` hook. It fires **before** the tool executes and **after** the LLM has already decided to call it. Unlike instructions in a system prompt (which the LLM can reason around or ignore), `cancel_tool` is enforced by the Strands framework — the LLM receives the block message and cannot retry the tool call for the same reason.
-
----
-
-## Navigation
-
-- **Next:** [Demo 01 — Graph-RAG vs RAG](../01-graphrag-demo/)
-
----
-
-## Contributing
-
-Contributions are welcome! See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
-
----
-
-## Security
-
-If you discover a potential security issue in this project, notify AWS/Amazon Security via the [vulnerability reporting page](https://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public GitHub issue.
-
----
+[Lab 1: Graph build](../01-graph-build/) builds the hotel knowledge graph in `1.1_build_graph.ipynb`, with Bedrock extracting entities and relationships against a pinned schema and Neo4j storing them alongside the vector and full-text indexes every later lab reads.
 
 ## License
 
 This library is licensed under the MIT-0 License. See the [LICENSE](../LICENSE) file for details.
-
-> Last updated: April 2026 | Strands Agents 1.27+ | Python 3.9+

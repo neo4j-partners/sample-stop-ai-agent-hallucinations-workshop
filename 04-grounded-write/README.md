@@ -1,103 +1,145 @@
 [< Back to Main README](../README.md)
 
-# Demo 06: Grounded Hotel Retrieval and Safe Reservations
+# Lab 4: The grounded write
 
-Take the anti-hallucination techniques from the earlier demos (01-05) into a self-contained agent you run on your own laptop against [Neo4j AuraDB](https://neo4j.com/cloud/aura-free/) and [Amazon Bedrock](https://aws.amazon.com/bedrock/). The agent grounds every answer in a reviewed hybrid graph retrieval and can take exactly one safe, idempotent action: create a reservation request. The full Amazon Bedrock AgentCore deployment that hosts this same boundary as a managed service has its live source in [`deployment-tools/`](deployment-tools/) and its reference walkthrough in [`advanced-deployment/`](advanced-deployment/).
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://python.org)
+[![Neo4j](https://img.shields.io/badge/Neo4j-AuraDB-4581C3.svg?style=flat&logo=neo4j)](https://neo4j.com/cloud/aura-free/)
+[![Amazon Bedrock](https://img.shields.io/badge/Amazon-Bedrock-FF9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/)
+[![Strands Agents](https://img.shields.io/badge/Strands_Agents-1.27+-00B4D8.svg?style=flat)](https://strandsagents.com)
 
-[![Python](https://img.shields.io/badge/Python-3.11-green.svg?style=flat)](https://python.org)
-[![AgentCore](https://img.shields.io/badge/Bedrock-AgentCore-orange.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/bedrock/agentcore/)
-[![Lambda](https://img.shields.io/badge/AWS-Lambda-orange.svg?style=flat&logo=aws-lambda)](https://aws.amazon.com/lambda/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-AuraDB-blue.svg?style=flat)](https://neo4j.com/cloud/aura-free/)
+Lab 3 blocked a 15-guest booking with `MaxGuestsHook`, and the block held. The hook fires on `BeforeToolCallEvent`, the model receives a cancellation instead of a tool result, and rephrasing gets it nowhere. As a demonstration that a guardrail can sit outside the model's reach, that is exactly right.
 
-This demo uses [Strands Agents](https://github.com/strands-agents/sdk-python) with [Amazon Bedrock](https://aws.amazon.com/bedrock/). The same boundary applies with other agent frameworks that support AgentCore Runtime.
+The number is the problem. `10` is a Python literal inside a hook class, in one notebook, next to one agent. A second caller of the same business rule has nothing to read it from, and the two copies begin drifting the day someone edits one of them. A business rule is connected data, and it belongs where the hotels and the reservations already live, enforced inside the same boundary as the write it governs.
+
+Lab 4 moves it there. The limit comes out of a `Rule` node in your graph, the reservation command reads that node inside the same transaction as the write, and the same 15-guest request is rejected with nothing written.
 
 **At a Glance**
-- **Failure it stops:** carrying the grounded techniques into a real action path without losing them.
-- **Neo4j:** Aura holds the hotel graph, the retrieval indexes, and the reservation rule.
-- **AWS:** Amazon Bedrock reasons over the evidence and embeds the query. AgentCore, Gateway, and Lambda host the same boundary as a managed service in the deferred deployment.
-- **You'll build:** a grounded retrieval path plus one protected reservation-request action, run locally.
+- **Failure it prevents:** an agent taking a real action that violates a business rule the prompt never mentioned, and a retried action being written twice.
+- **Neo4j:** the `Rule` node `demo-06-maximum-guests` read inside the write transaction, the `ReservationRequest` node and its `FOR_HOTEL` relationship, three uniqueness constraints, and parameterized Cypher only.
+- **AWS:** Bedrock Claude reasons over the structured command response, and the Strands `@tool` boundary carries the closed five-field input schema.
+- **You'll build:** `hotel_agent` again, with the reservation write registered and `MaxGuestsHook` removed, then four command outcomes run against your own graph.
 
 ---
 
-## What This Demo Shows
+## The one notebook
 
-Demos 01-05 build techniques that reduce hallucination. Demo 06 shows the production shape of three of them, all runnable from one notebook against your own Aura instance:
+`4.1_reservation_write.ipynb` has 21 cells in six sections. It creates no AWS resources.
 
-| Technique (from demos) | Production shape here |
-|------------------------|-----------------------|
-| **Graph-RAG** (demo 01) | A fixed `HybridCypherRetriever` over Neo4j: vector index plus full-text index, one reviewed Cypher traversal, structured evidence the agent must cite |
-| **Grounded abstention** (demos 02-04) | The agent answers only from returned evidence and abstains when the graph does not support a claim, including live availability |
-| **Guardrails that cannot be argued away** (demos 04-05) | One idempotent reservation command enforces a Neo4j guest-limit rule at the data boundary, not in the prompt |
+| Section | What it does |
+|---|---|
+| 1. Connect, and confirm the rule is in the graph | Applies the idempotent graph preparation, reports what is still missing, then reads the `Rule` node and asserts it agrees with the shared constant |
+| 2. Register the write on `hotel_agent` | Rebuilds Lab 3's `hotel_agent` with `create_reservation_request_tool` added and `MaxGuestsHook` removed |
+| 3. A 15-guest request is rejected | Computes the dates and the `request_id`, asks the agent to book 15 guests, then calls the command directly to read the fields the agent was working from |
+| 4. A valid request is recorded, and safe to retry | Accepts a within-limit request on the same `request_id`, then re-delivers it identically |
+| 5. A hotel that does not exist is rejected | Sends `hotel_id hotel-does-not-exist` through the agent, then through the command directly |
+| 6. Inspect the reservation in your graph | Matches on `request_id` and asserts exactly one row |
 
-The retrieval tool accepts only a `query`. The reservation command accepts only `request_id`, `hotel_id`, `check_in`, `check_out`, and `guests`. Callers cannot pick a retriever, a ranker, a weight, a result count, or an actor identity. The frozen contracts are documented in [CONTRACTS.md](CONTRACTS.md).
-
----
-
-## One Notebook
-
-`01_hybrid_retrieval.ipynb` runs the full local story end to end against your own Neo4j Aura and Amazon Bedrock. It creates no AWS resources.
-
-| Section | What it proves |
-|---------|----------------|
-| Hybrid retrieval | A hero question is grounded in vector plus full-text evidence and one reviewed Cypher traversal. |
-| Abstention | An availability question the graph cannot answer forces the agent to decline instead of inventing a claim. |
-| Rule rejection | A 15-guest request is rejected with `reason_code=max_guests_exceeded` and no write, because the Neo4j maximum-guests rule caps a request at 10. |
-| Safe write | A corrected request within the limit records one `ReservationRequest` linked by `FOR_HOTEL`, and re-delivering the same `request_id` returns `duplicate=true` with no second node. |
-| Graph inspection | The stored request is read back by its stable `request_id`. |
-
-Live cells self-skip when credentials are absent, so the notebook parses and runs cleanly in CI. The reservation cells need only your Aura connection; they derive the hero `hotel_id` from the local fixture manifest and never depend on a live retrieval result.
+Live cells self-skip. Cell 3 sets `NEO4J_READY` from `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`, `BEDROCK_READY` from whether boto3 finds AWS credentials, and `AGENT_READY` from both, so the notebook runs top to bottom with no configuration at all.
 
 ---
 
-## Architecture
+## Where the limit lives now
 
-```
-Local path (Notebook)
-  query -> HybridCypherRetriever -> Neo4j Aura -> structured evidence -> grounded local agent
-  reservation payload -> create_reservation_request -> Neo4j Aura (rule check + idempotent write)
+Section 1 reads the rule out of the graph before anything is written. That cell is the whole argument of the lab: the number is not in this notebook, not in a prompt, and not in a hook class. It is a property on a node, with its rejection message and its enable flag beside it, and any caller that can reach the graph reads the same value.
+
+```python
+from workshop.contracts import MAX_GUESTS, MAX_GUESTS_RULE_ID
+from workshop.graph_setup import RULE_QUERY
+
+rule = session.run(RULE_QUERY, rule_id=MAX_GUESTS_RULE_ID).single()
+assert rule["max_guests"] == MAX_GUESTS
 ```
 
-The same boundary, hosted as a managed AWS service, has its live source in `deployment-tools/` and its reference walkthrough in `advanced-deployment/`:
+`MAX_GUESTS_RULE_ID` is `demo-06-maximum-guests` and `MAX_GUESTS` is `10`, both from `workshop.contracts`. `RULE_QUERY` is parameterized Cypher in `workshop.graph_setup`, and it returns `max_guests`, `enabled`, `rejection_message`, `steering_message`, and a count of matching rule nodes. The notebook prints all four properties, so the rule's origin is visible rather than asserted.
 
-```
-Deployment (deferred)
-  caller (request_id) -> AgentCore Runtime (search_hotel_knowledge, in-process)
-                                     |
-                                     +-> AgentCore Gateway -> create_reservation_request Lambda -> Neo4j Aura
-```
+The assertion runs in that direction on purpose. When the constant and the graph disagree, the graph is the one that decides, because the graph is what the command reads. `demo-06-maximum-guests` is a real identifier in seeding and query code, not a leftover label; it is not renamed by the six-lab renumbering.
 
-- **`create_reservation_request`** enforces the full closed schema, canonical UUID, strict dates, positive guest count, and the Neo4j maximum-guests rule at the command boundary. The notebook calls it directly; the deferred Lambda wraps the same function.
-- **Neo4j AuraDB** holds the prepared hotel knowledge graph, the maximum-guests rule, and workshop-owned reservation requests.
+### The hook comes off the agent
 
----
+Section 2 rebuilds `hotel_agent` with two changes from Lab 3. `create_reservation_request_tool` joins the toolset, and `MaxGuestsHook` is gone.
 
-## The Hybrid Retriever
+Removing the hook is the point rather than a simplification. The rule it enforced now lives in the graph, and `workshop.reservation_command` reads it inside the write transaction, so the limit holds for every caller of the command: this notebook calling it directly, the agent calling it as a tool, and the Lambda Lab 5 puts behind AgentCore Gateway. A hook protects one agent. A rule in the graph, checked at the write boundary, protects the data.
 
-The retrieval tool always uses the same configuration. Callers cannot change it:
-
-- `HybridCypherRetriever` from `neo4j-graphrag`
-- vector index `hotel_chunk_embeddings` and full-text index `hotel_chunk_fulltext`
-- Amazon Nova 2 embeddings, 1,024 dimensions, `GENERIC_INDEX` purpose
-- explicit `NAIVE` fusion with `top_k=5`
-- one reviewed, parameterized Cypher traversal from chunk to hotel and amenity
-
-Each result returns chunk evidence, the hybrid score, the query terms found verbatim in that evidence, and hotel facts (ID, name, address, guest rating, amenities). Missing facts come back as null or an empty list. Hotel IDs are null for non-fixture hotels, so those hotels cannot be sent to the reservation command. The retriever never claims live inventory or guaranteed availability, which is why the agent abstains on availability questions.
+The system prompt still carries `GROUNDING_INSTRUCTIONS` from `workshop.hybrid_retrieval`, the same abstention text Lab 2 used, plus one instruction to pass the caller's `request_id`, `hotel_id`, and dates through exactly as written and never to claim a booking succeeded unless the response says `accepted`.
 
 ---
 
-## The Reservation Command
+## The write contract is frozen
 
-The command is idempotent by a caller-created `request_id` UUID. The same ID is reused on retries.
+The command accepts exactly five fields and nothing else:
+
+```python
+request_id, hotel_id, check_in, check_out, guests
+```
+
+There is no actor field, no guest identity, no room selection, no payment field, and no booking-lifecycle operation. `reservation_input_schema()` in `workshop.contracts` is closed with `additionalProperties: False`, and dates are `YYYY-MM-DD`. There is exactly one write path in the workshop, and widening it is deliberately out of scope: an extra parameter, a second write, or a caller-selectable retriever all go against the frozen contract in [`CONTRACTS.md`](CONTRACTS.md). Flag it before adding one.
+
+Every response is a structured document rather than prose, so the agent reports an outcome instead of composing an apology:
 
 | Outcome | `status` | `reason_code` | Write behavior |
-|---------|----------|---------------|----------------|
-| Accepted | `accepted` | omitted | One request plus one `FOR_HOTEL` relationship |
+|---|---|---|---|
+| Accepted | `accepted` | omitted | One `ReservationRequest` plus one `FOR_HOTEL` relationship |
 | Duplicate delivery | `accepted` | omitted | Returns the existing request with `duplicate=true` |
-| Policy rejection | `rejected` | `max_guests_exceeded` | No write |
+| Policy rejection | `rejected` | `max_guests_exceeded` | No write. Also returns `max_guests` |
 | Unknown hotel | `rejected` | `unknown_hotel` | No write |
 | Invalid dates | `rejected` | `invalid_dates` | No write |
+| Unauthorized | `error` | `unauthorized` | No write |
+| Service failure | `error` | `service_error` | No intentional write |
 
-A 15-guest request is rejected with no write because the enabled Neo4j rule caps a request at 10 guests. The correction is a new command from the caller, not a silent adjustment inside the model. Reusing a request ID with different input returns `service_error` and never changes the stored request.
+`status`, `request_id`, `hotel_id`, `duplicate`, and `message` are present on every response. Accepted and duplicate responses add `created_at`, a Neo4j-generated timestamp.
+
+### The four cases the notebook runs
+
+1. **`max_guests_exceeded`.** The agent is asked to book `OVER_LIMIT_GUESTS`, which is `15`, into the hero hotel. Nothing in the prompt mentions a limit of 10, so the model could not have been argued out of one. The command reads the rule, rejects, and writes nothing. Section 3 then calls the command directly and asserts `status == "rejected"` and `reason_code == "max_guests_exceeded"`.
+2. **Accepted.** The same `request_id` with `guests=MAX_GUESTS` creates one `ReservationRequest` linked to the hero hotel by `FOR_HOTEL`. The cell asserts `status == "accepted"` and `duplicate` is false.
+3. **Duplicate delivery.** The identical payload delivered a second time returns the stored record with `duplicate=true` and its original `created_at`, and creates no second node. The cell asserts `replay["duplicate"] is True`.
+4. **`unknown_hotel`.** `hotel_id hotel-does-not-exist` matches no prepared fixture `Hotel`, so the command rejects rather than creating an orphan request. This is why grounded retrieval returns an opaque `hotel_id` and not a display name: a name a model half-remembers fails this check, and a name it invents outright fails it too.
+
+### The notebook creates the `request_id`, not the model
+
+Section 3 generates it and prints it:
+
+```python
+REQUEST_ID = str(uuid.uuid4())
+```
+
+Idempotence cannot be demonstrated any other way. A model that invents a fresh UUID on the retry produces two distinct requests and two nodes, and the second delivery is a new write rather than a replay. The caller owns the key, reuses it on every retry, and the agent is told to pass it through verbatim. `_validate_command` rejects anything that is not a canonical UUID before a session is opened.
+
+Idempotence itself is enforced by the graph, not by a check the caller remembered to write. `demo06_reservation_request_id` makes `ReservationRequest.request_id` unique, the command reads any existing request inside the write transaction first, and a concurrent delivery that loses the uniqueness race reads the winning record instead of writing a second one. Reusing a `request_id` with different input returns `service_error` and never changes the stored request.
+
+### Dates are computed, never hardcoded
+
+```python
+check_in = (date.today() + timedelta(days=30)).isoformat()
+check_out = (date.today() + timedelta(days=32)).isoformat()
+```
+
+A fixed future date silently rots into the past and flips this lab from a clean accept into an `invalid_dates` rejection, on a date nobody chose. The command refuses a check-in earlier than today, so relative dates are what keep the notebook runnable next year. Any new date in this lab has to be computed the same way.
+
+---
+
+## What this lab writes, and what it does not
+
+This lab writes workshop-owned reservation **requests**. Every rule and request node it touches carries `workshop_owner=neo4j-ftw-demo-6`.
+
+It does not hold inventory, book a room, take a payment, or confirm anything. Real inventory, booking, payment, and confirmation state stay behind an external-system boundary that this workshop does not cross. The command's Cypher cannot update or delete canonical `Hotel`, `Chunk`, `Document`, `Amenity`, or `Rule` data, and `test_cypher_cannot_modify_canonical_hotel_data` pins that.
+
+The graph shape is small on purpose:
+
+```
+(:ReservationRequest {request_id, check_in, check_out, guests, status, created_at, workshop_owner})
+      -[:FOR_HOTEL]-> (:Hotel {hotel_id})
+```
+
+Three uniqueness constraints make it safe, created idempotently by `apply_demo6_graph`:
+
+| Constraint | Guarantees |
+|---|---|
+| `demo06_fixture_hotel_id` | `Hotel.hotel_id` is unique, so one `hotel_id` names one hotel |
+| `demo06_reservation_request_id` | `ReservationRequest.request_id` is unique, which is what makes a retry safe |
+| `demo06_rule_id` | `Rule.rule_id` is unique, so there is one `demo-06-maximum-guests` rule and not two disagreeing ones |
+
+No Cypher in this lab is generated by a model. Every query is a named, parameterized constant in `workshop/src/workshop/reservation_command.py` or `workshop/src/workshop/graph_setup.py`, and no part of a request is interpolated into a query string.
 
 ---
 
@@ -105,151 +147,128 @@ A 15-guest request is rejected with no write because the enabled Neo4j rule caps
 
 ### Prerequisites
 
-- **[Python](https://python.org/downloads) 3.11+**
-- **[uv](https://docs.astral.sh/uv/)** package manager ([installation guide](https://docs.astral.sh/uv/getting-started/installation/))
-- A **Neo4j AuraDB** instance with the prepared Demo 06 graph (see [Neo4j Setup](#neo4j-setup))
-- **Amazon Bedrock access** for the query embedding (Amazon Nova 2) and the grounded agent
+- Python 3.12+ and the [uv](https://docs.astral.sh/uv/) package manager
+- The repo-root `.env` filled in, per [`00-setup/README.md`](../00-setup/README.md)
+- Lab 1 finished, so the fixture hotels, the three constraints, and the `Rule` node exist
+- Lab 3 read, so `hotel_agent` and `MaxGuestsHook` are familiar
+- Amazon Bedrock access for the agent turns and for the query embedding behind the retrieval tool
 
 ### Step 1: Install dependencies
 
 ```bash
-cd 06-agentcore-boto3-demo
+cd 04-grounded-write
 uv venv && uv pip install -r requirements.txt
 ```
 
-### Step 2: Configure your Neo4j connection
+`requirements.txt` installs the shared package with `-e ../workshop`, which brings neo4j, boto3, neo4j-graphrag, and python-dotenv, plus `strands-agents` and `bedrock-agentcore-starter-toolkit`.
 
-Set these in your environment or `.env`:
+### Step 2: Confirm the command and the rule constant import
 
 ```bash
-NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your-password
-NEO4J_DATABASE=neo4j
+cd 04-grounded-write
+uv run python -c "from workshop.reservation_command import create_reservation_request; from workshop.contracts import MAX_GUESTS, MAX_GUESTS_RULE_ID; print(MAX_GUESTS_RULE_ID, MAX_GUESTS)"
 ```
+
+This prints `demo-06-maximum-guests 10` and proves the editable install resolved. It opens no connection, so it works with or without credentials.
 
 ### Step 3: Run the notebook
 
-```bash
-code 01_hybrid_retrieval.ipynb
-```
+Open `4.1_reservation_write.ipynb` in VS Code, Kiro, or any editor with notebook support, and run the cells in order. Section 1 raises with a named corrective action if the graph is not ready, so a missing rule or fixture is reported before any write is attempted.
 
-The notebook confirms your Aura connection and prepared indexes, runs the hero question through hybrid retrieval, demonstrates abstention on a question the graph cannot answer, rejects a 15-guest request, records and re-delivers a valid request idempotently, and reads the stored request back. If Neo4j or Bedrock is not configured, the affected live cells self-skip and the notebook still runs top to bottom.
-
-The repository acceptance path runs the same notebook:
+The notebook is registered with the shared acceptance runner as lab 4:
 
 ```bash
-python setup/run_notebooks.py --labs 6
+uv run setup/run_notebooks.py --list
 ```
 
-This executes the notebook without creating AWS resources.
+Run that from the repository root. Executing lab 4 through the runner writes to your graph exactly as running the notebook by hand does, so run it deliberately rather than alongside a graph build. The root [README](../README.md) documents how to execute a lab through the runner.
 
 ---
 
-## Deployment (deferred, see `deployment-tools/` and `advanced-deployment/`)
-
-The full Amazon Bedrock AgentCore deployment is staged intact and is not run in this workshop pass. Its live source lives in [`deployment-tools/`](deployment-tools/): the Runtime entry point (`booking_agent.py`), the Gateway target manifest (`gateway_target.json`), the reservation Lambda, and the container `Dockerfile`. Its reference material lives in [`advanced-deployment/`](advanced-deployment/): the second facilitator notebook (`02_agentcore_walkthrough.ipynb`) and the Secrets Manager and IAM boundary described in [`advanced-deployment/DEPLOYMENT.md`](advanced-deployment/DEPLOYMENT.md). See each folder's `README.md` for what is staged and why.
-
-### Provisioning the infrastructure first
-
-Before any deploy step, the slow, privileged AWS infrastructure has to exist:
-the Neo4j command secret, the three least-privilege IAM roles (reservation
-Lambda, Gateway, Runtime), the reservation Lambda, and the AgentCore Gateway
-with its single target. The stand-alone [`../setup/provision_agentcore.py`](../setup/provision_agentcore.py)
-script creates all of it and writes `AGENTCORE_GATEWAY_URL`,
-`AGENTCORE_RUNTIME_ROLE_ARN`, and `NEO4J_COMMAND_SECRET_ID` into the repo-root
-`.env` for the deploy step to read.
+## Tests
 
 ```bash
-uv run setup/provision_agentcore.py provision   # Create the AgentCore infrastructure
-uv run setup/provision_agentcore.py status       # Report what exists
-uv run setup/provision_agentcore.py teardown      # Delete it again
+cd 04-grounded-write
+uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-This packages and deploys the reservation Lambda from `deployment-tools/`, so it
-reads Demo 06 files but Demo 06 never reads anything under `setup/`. The full
-command reference, the resources it creates, the Lambda packaging details, and
-the `.env` keys it manages are documented in [`../setup/README.md`](../setup/README.md).
+**56 tests**, plus 12 subtests reported by the cases that use them:
 
-### Two credentials, two secrets (deferred boundary)
+| File | Tests | What it covers |
+|---|--:|---|
+| `test_reservation_command.py` | 22 | Every frozen outcome, idempotency, the concurrent-retry race, fail-closed behavior on a missing or invalid rule, and that the Cypher cannot modify canonical hotel data |
+| `test_graph_setup.py` | 12 | Constraint shape rather than only constraint name, fixture resolution by source filename, manifest determinism, and that the reservation graph shape carries no actor |
+| `test_hybrid_retrieval.py` | 12 | The frozen retrieval contract this lab writes against: fixed indexes, static traversal, frozen ranker and `top_k`, bounded null-safe results |
+| `test_contracts.py` | 7 | The closed schemas, the Gateway projection, the reason-code set, and that the reservation contract has no actor or booking lifecycle |
+| `test_demo_guest_consistency.py` | 3 | That the guest limit has one source of truth |
 
-When deployed, the Runtime and command use separate identities and never share a credential:
+`test_reservation_command.py` and `test_contracts.py` account for 29 of the 56, which is the reservation command and its contracts.
 
-- **Runtime-read**: reads chunk search indexes and traverses to hotel and amenity data. No write privileges.
-- **Lambda-command**: reads the maximum-guests rule and fixture hotel identity, and creates workshop-owned `ReservationRequest` nodes and `FOR_HOTEL` relationships. Cannot update or delete canonical hotel, chunk, document, amenity, or rule data.
+Every test but one runs without a live graph. `SeededRuleTests::test_seeded_rule_matches_the_contract` in `test_demo_guest_consistency.py` needs a live graph: it reads the `Rule` node with `RULE_QUERY` and asserts the node exists exactly once, carries `max_guests == MAX_GUESTS`, and is enabled. Its `setUp` calls `load_dotenv()` and skips with `Neo4j is not configured` when `NEO4J_URI`, `NEO4J_USERNAME`, or `NEO4J_PASSWORD` is absent, which is how the offline suite stays green. The other two tests in that file read `graph_setup.py` as source, using `ast` to prove the seeding call binds `max_guests` to `contracts.MAX_GUESTS` rather than to a literal `10`, because a literal and a constant reference evaluate identically at runtime and only the source drifts.
 
-Deployed code reads `NEO4J_READ_SECRET_ID` and `NEO4J_COMMAND_SECRET_ID` from Secrets Manager. Each secret contains `uri`, `username`, `password`, and `database`. The local notebook reads `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`. Passwords, secret values, and full connection strings must never appear in a deployment package, a prompt, or a log.
+That live test is also the one that reports a graph problem rather than a code problem. Run against a graph whose build had not yet reached the rule-seeding step, it fails with `AssertionError: 0 != 1 : Expected exactly one demo-06-maximum-guests rule node`, and the other 55 tests pass. Read a failure there as "re-run Lab 1", or as "the build is still running", before reading it as a regression.
+
+`conftest.py` keeps pytest out of any staged deployment directory, so a bare `pytest` from this folder collects only the five files above.
 
 ---
 
-## Neo4j Setup
+## Troubleshooting
 
-### Create a free Neo4j AuraDB instance
-
-1. Go to [console.neo4j.io](https://console.neo4j.io) and create a free account.
-2. Click **New Instance**, then **AuraDB Free**.
-3. Download the credentials file when prompted. It contains your URI, username, and password.
-
-### Prepare the Demo 06 graph
-
-The retrieval and command paths expect the prepared graph: hotel documents and chunks, the `hotel_chunk_embeddings` and `hotel_chunk_fulltext` indexes, the maximum-guests rule, and the fixture hotel identities in `fixtures/hotel_ids.json`. `graph_setup.py` applies this preparation, and the notebook reports any missing pieces before it runs.
-
-Run the one-time readiness check before an event to confirm every dependency is in place:
+**No `Rule` node found, or `enabled maximum-guests rule is unavailable`.** The command fails closed rather than accepting an unchecked request, so this is the correct behavior for an unseeded graph. `1.1_build_graph.ipynb` seeds `demo-06-maximum-guests` in its closing step, and section 1 of this notebook applies the same idempotent preparation again through `apply_demo6_graph`. Re-run Lab 1 and let it finish. Confirm the node is there without writing anything:
 
 ```bash
-python graph_setup.py --check-only
+cd 04-grounded-write
+uv run python -c "
+from neo4j import GraphDatabase
+from dotenv import load_dotenv
+from workshop.contracts import MAX_GUESTS_RULE_ID
+from workshop.graph_setup import RULE_QUERY
+from workshop.hybrid_retrieval import Neo4jConfig
+load_dotenv()
+c = Neo4jConfig.from_environment()
+with GraphDatabase.driver(c.uri, auth=(c.username, c.password)) as d:
+    with d.session(database=c.database) as s:
+        print(dict(s.run(RULE_QUERY, rule_id=MAX_GUESTS_RULE_ID).single()))
+"
 ```
 
-It reads your `NEO4J_*` environment values and reports one corrective action per missing dependency (absent env vars, missing or offline indexes, missing constraints, unresolved fixtures, or the missing rule), exiting non-zero until the graph is ready. Drop `--check-only` to apply the idempotent Demo 06 graph preparation.
+A `rule_count` of `0` means the rule is missing. A `rule_count` of `1` with `enabled: False` means the command will not enforce the limit and will not write either. A `max_guests` that disagrees with `contracts.MAX_GUESTS` means the graph was seeded by older code; re-seed the graph rather than changing the constant, since the graph is what the command reads.
+
+**A duplicate looks like a failure.** It is not. `duplicate=true` with `status=accepted` is the designed outcome of re-delivering the same `request_id` with the same payload, and it means no second node was written. The `created_at` in that response is the original timestamp, not a new one, which is the evidence that nothing was updated. Section 6 asserts exactly one row after three deliveries of that `request_id` plus one rejection. A retry that returns `duplicate=false` is the outcome to be suspicious of: it means the `request_id` changed between attempts, most likely because a model invented a new one instead of passing the caller's through. If instead you get `service_error` on a retry, the `request_id` was reused with different `hotel_id`, dates, or `guests`; the stored request is immutable and was left untouched.
+
+**An unknown-hotel rejection on a hotel you can see in the graph.** `reason_code=unknown_hotel` means the `hotel_id` matched no `Hotel` node carrying `demo6_fixture = true`. Only hotels in the committed fixture manifest have a stable `hotel_id`, and grounded retrieval returns `hotel_id: null` for every other hotel, precisely so those hotels cannot be sent to the write path. Take the ID from `manifest.hotels[HERO_SOURCE]` as section 3 does, or from a retrieval result's `hotel_id` field, and never from a hotel name. If the fixture hotels themselves are unresolved, section 1 names that as a readiness problem and the fix is to re-run Lab 1.
+
+**Bedrock access denied, or `AccessDeniedException` on the first agent call.** Enable the model in your region through the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), and confirm `AWS_REGION` in the repo-root `.env` matches that region. The notebook reads `MODEL_ID` from the environment and defaults to `us.anthropic.claude-sonnet-5`, so override that variable to use a different model. The three agent cells are gated on `AGENT_READY`; the direct-command cells need only Neo4j, so a Bedrock problem leaves the four command outcomes still demonstrable.
+
+**Cells print `Skipping: needs both Neo4j and AWS credentials.`** That is `AGENT_READY` reporting absent configuration, not an empty graph. Check `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` in the repo-root `.env`, and note that the hosted Workshop Studio environment writes `NEO4J_USER` while every lab here reads `NEO4J_USERNAME`.
 
 ---
 
-## File Structure
+## What is in this folder
 
 ```
-06-agentcore-boto3-demo/
-├── 01_hybrid_retrieval.ipynb        # The self-contained local notebook
-├── CONTRACTS.md                     # Frozen retrieval and command contracts
-├── contracts.py                     # Shared schema and contract helpers
-├── graph_setup.py                   # Prepare and verify the Demo 06 graph
-├── hybrid_retrieval.py              # HybridCypherRetriever configuration and tool
-├── reservation_command.py           # Reservation command logic (called locally)
-├── requirements.txt                 # Local dependencies (notebook)
-├── conftest.py                      # Keeps the local test run out of the deployment dirs
-├── fixtures/
-│   └── hotel_ids.json               # Committed fixture hotel identities
-├── tool_schemas/
-│   └── tools.json                   # Tool definitions
-├── deployment-tools/                # Live deployment source, not run in this pass
-│   ├── README.md                    # What the live source is and how it is used
-│   ├── booking_agent.py             # AgentCore Runtime entry point (Strands)
-│   ├── Dockerfile                   # Runtime container image
-│   ├── .dockerignore
-│   ├── agent_requirements.txt       # Runtime dependencies (deployed to AgentCore)
-│   ├── gateway_target.json          # The single Gateway target manifest
-│   ├── lambda_tools/
-│   │   └── create_reservation_request/  # The one reservation Lambda
-│   └── test_runtime_integration.py  # Deployment tests (run in the deployment env)
-└── advanced-deployment/             # Reference only, nothing automated reads it
-    ├── README.md                    # What is kept here and why
-    ├── 02_agentcore_walkthrough.ipynb  # Facilitator: pre-deployed Runtime + command
-    └── DEPLOYMENT.md                # The production-hardening boundary reference
+04-grounded-write/
+├── 4.1_reservation_write.ipynb   # The one notebook, 21 cells
+├── CONTRACTS.md                  # The frozen retrieval and command contracts
+├── requirements.txt              # -e ../workshop, strands-agents, starter toolkit
+├── conftest.py                   # Keeps pytest out of staged deployment directories
+├── test_reservation_command.py   # 22 tests
+├── test_graph_setup.py           # 12 tests
+├── test_hybrid_retrieval.py      # 12 tests
+├── test_contracts.py             # 7 tests
+└── test_demo_guest_consistency.py  # 3 tests, one of them live
 ```
+
+The implementation is not here. It lives in the shared package, because Lab 5 deploys the same code: [`workshop/src/workshop/reservation_command.py`](../workshop/src/workshop/reservation_command.py), [`contracts.py`](../workshop/src/workshop/contracts.py), and [`graph_setup.py`](../workshop/src/workshop/graph_setup.py). [`CONTRACTS.md`](CONTRACTS.md) states the frozen shapes in prose; `contracts.py` is the authority when the two disagree.
 
 ---
 
-## Cleanup
+## What's next
 
-The notebook creates no AWS resources, so there is nothing to clean up from running it. If a facilitator later deploys the staged AgentCore boundary, tear it down with the workshop cleanup in [Demo 10](../10-cleanup/).
+**[Lab 5: Deploy to AgentCore](../05-agentcore-deploy/)** takes this same retrieval tool and this same reservation command and runs them as a managed service on Amazon Bedrock AgentCore. The retriever is unchanged, the five-field contract is unchanged, and the rule stays in the graph. The Runtime holds a read identity, the reservation Lambda holds a command identity, and the request is correlated end to end by the same `request_id` you created here. The contracts do not change. The trust boundary does.
 
-> Skip cleanup if you are using an AWS-provided workshop account. It is cleaned up automatically.
-
----
-
-## Navigation
-
-- **Previous:** [Demo 05: Agent Control Steering](../05-steering-demo/)
-- **Start from the beginning:** [Demo 01: Graph-RAG vs RAG](../01-graphrag-demo/)
+- **Previous:** [Lab 3: Agents and tools](../03-agents-and-tools/)
+- **Start from the beginning:** [Lab 1: Graph build](../01-graph-build/)
 
 ---
 
@@ -257,16 +276,12 @@ The notebook creates no AWS resources, so there is nothing to clean up from runn
 
 Contributions are welcome. See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
 
----
-
 ## Security
 
 If you discover a potential security issue in this project, notify AWS/Amazon Security via the [vulnerability reporting page](https://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public GitHub issue.
-
----
 
 ## License
 
 This library is licensed under the MIT-0 License. See the [LICENSE](../LICENSE) file for details.
 
-> Last updated: July 2026 | Strands Agents 1.27+ | Python 3.11+ | Amazon Bedrock AgentCore
+> Last updated: August 2026 | Strands Agents 1.27+ | Python 3.12+

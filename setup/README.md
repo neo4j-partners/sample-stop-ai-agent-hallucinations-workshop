@@ -11,10 +11,10 @@ code cell's source preview and elapsed time, followed by the cell's captured
 text output. Run it from the repository root:
 
 ```bash
-uv run setup/run_notebooks.py                 # Labs 00-05; 06-08 are skipped
+uv run setup/run_notebooks.py                 # Labs 1-4 and 6; Lab 5 is gated
 uv run setup/run_notebooks.py --labs 4        # One lab
 uv run setup/run_notebooks.py --labs 2,3,4    # A list
-uv run setup/run_notebooks.py --labs 2-5      # A range
+uv run setup/run_notebooks.py --labs 1-4      # A range
 uv run setup/run_notebooks.py --list          # Show the notebook registry
 ```
 
@@ -35,16 +35,17 @@ by Git.
 
 ### AWS side effects
 
-The default command runs every lab except the flag-gated ones (lab 07 deploy
-and lab 10 cleanup), which require explicit flags because they change AWS
-resources:
+The default command runs every lab except Lab 5. Lab 5's three notebooks change
+AWS resources, so the two that deploy and the one that deletes each require
+their own flag. Lab 0 is a credential checklist in a README and has no notebook,
+so it never appears in a run.
 
 ```bash
-# Deploy or update the AgentCore resources in lab 07
-uv run setup/run_notebooks.py --labs 7 --include-deploy
+# Deploy or update the AgentCore resources: 5.1 and 5.3
+uv run setup/run_notebooks.py --labs 5 --include-deploy
 
-# Delete the tagged workshop resources in lab 10
-uv run setup/run_notebooks.py --labs 10 --include-cleanup
+# Delete the tagged workshop resources: 5.2
+uv run setup/run_notebooks.py --labs 5 --include-cleanup
 ```
 
 The runner treats an uncaught cell error as a failure and exits nonzero when
@@ -58,25 +59,35 @@ When notebooks are run interactively in an IDE, Git output stripping is still
 handled by the repository's `nbstripout` filter. Register it once after cloning
 as described in the root README.
 
-## Provision the Demo 06 AgentCore infrastructure
+## Provision the Lab 5 AgentCore infrastructure
 
 `provision_agentcore.py` stands up the slow, privileged AWS infrastructure that
-the deferred Demo 06 deployment depends on, mirroring what Workshop Studio
+the Lab 5 deployment depends on: the Neo4j command secret, the IAM roles, the
+reservation Lambda, and the Gateway. It mirrors what Workshop Studio
 pre-provisions for hosted participants.
 
-**The core workshop never needs this script.** The self-contained
-`06-agentcore-boto3-demo/01_hybrid_retrieval.ipynb` notebook runs entirely
-against your own Aura and Amazon Bedrock and creates no AWS resources. Run
-`provision_agentcore.py` only when a facilitator opts in to the managed
-AgentCore boundary staged in
-[`../06-agentcore-boto3-demo/deployment-tools/`](../06-agentcore-boto3-demo/deployment-tools/).
+**Labs 1 through 4 and Lab 6 never need this script.** They run against your own
+Aura and Amazon Bedrock and create no AWS resources. Lab 5 does need it. Run it
+before
+[`../05-agentcore-deploy/5.1_agentcore_deploy.ipynb`](../05-agentcore-deploy/5.1_agentcore_deploy.ipynb),
+which reads `AGENTCORE_GATEWAY_URL` and `AGENTCORE_RUNTIME_ROLE_ARN` from the
+root `.env` and skips every live cell until both are present.
+
+**This creates real, billable AWS resources.** It is idempotent, so re-running it
+is safe. Teardown is two halves under two owner tags. `teardown` here deletes
+what this script created, tagged `demo06-agentcore=true`;
+[`../05-agentcore-deploy/5.2_teardown.ipynb`](../05-agentcore-deploy/5.2_teardown.ipynb)
+and [`../05-agentcore-deploy/workshop_cleanup.py`](../05-agentcore-deploy/workshop_cleanup.py)
+delete what `5.1_agentcore_deploy.ipynb` created, tagged
+`WorkshopResource=stop-ai-agent-hallucinations`. Either half alone leaves the
+other billing.
 
 Like the notebook runner, this is a PEP 723 stand-alone script: `uv` resolves
-its single dependency (`boto3`) on the first run, with no separate install step.
-The dependency arrow points one way. This script reads Demo 06 files to package
-the Lambda and to learn the contracts; Demo 06 never reads anything under
-`setup/`. Everything that crosses back to the deployment is written to the
-repo-root `.env` as a handful of identifiers.
+its single dependency, `boto3`, on the first run, with no separate install step.
+The dependency arrow points one way. This script reads Lab 5 files to package
+the Lambda and installs the shared `workshop` package into it; Lab 5 never reads
+anything under `setup/`. Everything that crosses back to the deployment is
+written to the repo-root `.env` as a handful of identifiers.
 
 ### Prerequisites
 
@@ -89,7 +100,7 @@ repo-root `.env` as a handful of identifiers.
   `NEO4J_PASSWORD`, `NEO4J_DATABASE`). The script refuses to run if any are
   missing, because they become the command secret.
 - **Amazon Bedrock model access.** The Runtime role authorizes
-  `us.anthropic.claude-sonnet-4-6` by default; override with `MODEL_ID`.
+  `us.anthropic.claude-sonnet-5` by default; override with `MODEL_ID`.
 
 ### Commands
 
@@ -109,9 +120,12 @@ gateway, Lambda, roles, secret) and comments the managed keys back out of `.env`
 
 ### What `provision` creates
 
-Each resource is tagged `demo06-agentcore=true` so [Demo 10](../10-cleanup/) and
-`teardown` can find it. The names all share the `demo06` prefix, which you can
-override with the `DEMO06_PREFIX` environment variable.
+Each resource is tagged `demo06-agentcore=true` so `teardown` can find it. That
+tag is what separates this half from the half
+[`../05-agentcore-deploy/workshop_cleanup.py`](../05-agentcore-deploy/workshop_cleanup.py)
+owns, and neither script touches the other's resources. The names all share the
+`demo06` prefix, which you can override with the `DEMO06_PREFIX` environment
+variable.
 
 | Resource | Name | Role |
 |----------|------|------|
@@ -119,9 +133,9 @@ override with the `DEMO06_PREFIX` environment variable.
 | IAM role (Lambda) | `demo06-reservation-lambda-role` | Reservation Lambda execution role: writes its own log group, reads only its own secret |
 | IAM role (Gateway) | `demo06-gateway-role` | Gateway role scoped to invoke only the one reservation Lambda |
 | IAM role (Runtime) | `demo06-runtime-role` | AgentCore Runtime execution role: ECR pulls, Runtime log groups, X-Ray, workload-identity tokens, and Bedrock model invocation. Grants no secret access |
-| Lambda function | `demo06-reservation-request` | The single reservation command behind the Gateway; its handler wraps `reservation_command.handler` from the demo root |
+| Lambda function | `demo06-reservation-request` | The single reservation command behind the Gateway; its handler wraps `workshop.reservation_command.handler` from the shared package |
 | AgentCore Gateway | `demo06-gateway` | NONE-auth MCP Gateway exposing exactly one target |
-| Gateway target | `demo06-reservation-request` | The sole target, defined by `deployment-tools/gateway_target.json`, exposing only `create_reservation_request` |
+| Gateway target | `demo06-reservation-request` | The sole target, defined by [`../05-agentcore-deploy/deployment-tools/gateway_target.json`](../05-agentcore-deploy/deployment-tools/gateway_target.json), exposing only `create_reservation_request` |
 
 ### The `.env` handoff
 
@@ -138,20 +152,25 @@ There is no `NEO4J_READ_SECRET_ID`. The stand-alone path uses one Neo4j user:
 the deployed Runtime reads Neo4j from the `NEO4J_*` environment values, and only
 the reservation Lambda reads from a secret. The stronger two-user, two-secret
 boundary is kept as reference in
-[`../06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md`](../06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md).
+[`../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md`](../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md).
 
 ### How the Lambda package is built
 
 `provision` builds the reservation Lambda deployment package in a temporary
 directory before creating or updating the function:
 
-- Dependencies install with a Linux platform target (`aarch64-manylinux2014`
-  for the ARM64/Graviton Lambda) so the wheels import at cold start even when
-  the provisioning host is macOS. `neo4j` is the only third-party dependency;
+- Dependencies install with a Linux platform target, `aarch64-manylinux2014` for
+  the ARM64/Graviton Lambda, so the wheels import at cold start even when the
+  provisioning host is macOS. `neo4j` is the only third-party dependency;
   `boto3` and `botocore` already ship in the Lambda runtime and are not vendored.
-- The wrapper `lambda_function.py` and the two shared demo-root modules,
-  `reservation_command.py` and `contracts.py`, are copied to the package root so
-  `lambda_function.handler` resolves its imports.
+- The shared `workshop` package installs in a second step with `--no-deps` and no
+  platform target. It is pure Python, and its declared dependencies are the union
+  of what all nine of its modules need, including `neo4j-graphrag`, which the
+  reservation Lambda never imports.
+- The wrapper `lambda_function.py` is copied to the package root, because
+  `lambda_function.handler` is the configured entry point. It imports
+  `workshop.reservation_command.handler`, which resolves from the installed
+  package.
 
 The function runs on `python3.12`, `arm64`, with a 30-second timeout and 256 MB
 of memory, and reads its Neo4j credential from the command secret through the
@@ -159,11 +178,15 @@ of memory, and reads its Neo4j credential from the command secret through the
 
 ### After provisioning
 
-With the three `.env` keys in place, the deferred deployment can build and launch
-the Runtime container against the provisioned Gateway and role. The participant
-notebook still creates no AWS resources; the managed boundary lives in the
-deployment folders. See
-[`../06-agentcore-boto3-demo/deployment-tools/README.md`](../06-agentcore-boto3-demo/deployment-tools/README.md)
+With the three `.env` keys in place,
+[`../05-agentcore-deploy/5.1_agentcore_deploy.ipynb`](../05-agentcore-deploy/5.1_agentcore_deploy.ipynb)
+builds and launches the Runtime container against the provisioned Gateway and
+role. That notebook creates real resources too: an AgentCore Runtime, an ECR
+repository, and a CodeBuild project, all tagged
+`WorkshopResource=stop-ai-agent-hallucinations` so
+[`../05-agentcore-deploy/5.2_teardown.ipynb`](../05-agentcore-deploy/5.2_teardown.ipynb)
+can delete them. See
+[`../05-agentcore-deploy/deployment-tools/README.md`](../05-agentcore-deploy/deployment-tools/README.md)
 for the deployable source and
-[`../06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md`](../06-agentcore-boto3-demo/advanced-deployment/DEPLOYMENT.md)
+[`../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md`](../05-agentcore-deploy/advanced-deployment/DEPLOYMENT.md)
 for the production-hardening boundary reference.

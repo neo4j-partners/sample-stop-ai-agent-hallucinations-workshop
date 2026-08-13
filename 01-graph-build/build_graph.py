@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 """Build the full knowledge graph from all 300 hotel FAQ documents.
 
-The extraction schema is pinned (see `graph_config.GRAPH_SCHEMA`) so the graph
+The extraction schema is pinned in `workshop.graph_schema.GRAPH_SCHEMA` so the graph
 matches the contract the agent is given in `query_knowledge_graph`'s docstring.
 Letting the LLM discover a schema per chunk sounds appealing, but it produces a
 different set of labels for every document and no query written against it can

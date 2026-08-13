@@ -30,7 +30,7 @@ from workshop.hybrid_retrieval import (
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5"
 GATEWAY_TARGET_NAME = "demo06-reservation-request"
 GATEWAY_SCHEMA_TOOL = "create_reservation_request"
 GATEWAY_COMMAND_TOOL = f"{GATEWAY_TARGET_NAME}___{GATEWAY_SCHEMA_TOOL}"
@@ -195,7 +195,6 @@ def invoke(
             model = BedrockModel(
                 model_id=os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
                 region_name=_runtime_region(),
-                temperature=0,
             )
             agent = Agent(
                 model=model,

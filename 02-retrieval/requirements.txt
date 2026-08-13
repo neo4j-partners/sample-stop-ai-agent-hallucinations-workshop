@@ -1,3 +1,7 @@
 # Lab 2 only retrieves. Everything it needs, the embedder and the index names
 # included, comes from the shared package.
 -e ../workshop
+
+# 2.2 closes by handing the one retrieval tool to a small agent, which is the
+# first time in the workshop a model is asked to decline rather than guess.
+strands-agents>=1.27.0

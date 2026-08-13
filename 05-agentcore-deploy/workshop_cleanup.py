@@ -84,9 +84,13 @@ LAMBDA_LAYER_NAME = "workshop-neo4j-driver"
 ECR_REPOS = [f"bedrock-agentcore-{name.lower()}" for name in RUNTIME_NAMES]
 CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 
-#: Exact config files this workshop creates. Modules 6 and 7 each run the starter
-#: toolkit from their own directory, and the toolkit writes ``.bedrock_agentcore.yaml``
-#: into that directory.
+#: Exact config files this workshop creates. The starter toolkit writes
+#: ``.bedrock_agentcore.yaml`` into whichever directory it is run from.
+#: ``5.1_agentcore_deploy.ipynb`` runs it from ``deployment-tools/``, because that
+#: is the container build context. The bare ``05-agentcore-deploy/`` entry is the
+#: path an earlier flat layout used, kept so a stale file from that layout is
+#: still cleaned up. A path that does not exist is reported ABSENT, so listing
+#: both costs nothing.
 #:
 #: This was previously a glob list that included ``~/.bedrock_agentcore*.yaml``. HOME is
 #: shared with every other AgentCore project on the machine, so running this teardown
@@ -96,6 +100,12 @@ CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 #: Exact repo-relative paths only. Never a glob, and never anything under HOME.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILES = [
+    str(
+        _REPO_ROOT
+        / "05-agentcore-deploy"
+        / "deployment-tools"
+        / ".bedrock_agentcore.yaml"
+    ),
     str(_REPO_ROOT / "05-agentcore-deploy" / ".bedrock_agentcore.yaml"),
 ]
 

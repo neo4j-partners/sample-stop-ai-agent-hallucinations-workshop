@@ -13,12 +13,14 @@ This reads the source rather than the running module because a literal and a
 constant reference evaluate to the same `10` at runtime. Only the source
 distinguishes them, and only the source drifts.
 
-The notebook adds the check this cannot make: an assertion against the `Rule`
-node in a live graph, which is the only thing that catches a graph seeded by
-an older version of this code.
+Source agreement is not the whole story, though: a participant whose graph was
+seeded by an older version of this code has a `Rule` node the source can say
+nothing about. `SeededRuleTests` makes that check against a live graph, and
+skips when there is no graph to check.
 """
 
 import ast
+import os
 import unittest
 from pathlib import Path
 
@@ -79,6 +81,66 @@ class GuestLimitConsistencyTests(unittest.TestCase):
                 "literal here lets the seeded rule drift from the limit the "
                 "reservation command enforces.",
             )
+
+
+class SeededRuleTests(unittest.TestCase):
+    """The `Rule` node in a live graph must carry the contract's limit.
+
+    This is the failure the source check cannot see. A graph seeded before the
+    limit last changed keeps the old `max_guests`, and the command reads the
+    graph, so the participant's rejection threshold silently stops matching the
+    constant every other test agrees on.
+
+    Skips without Neo4j credentials, which is how the offline suite stays green.
+    """
+
+    def setUp(self) -> None:
+        # Participants keep their credentials in the repo-root `.env` rather
+        # than exported, so without this the test would skip on every machine
+        # that actually has a graph to check.
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        if not all(
+            os.getenv(name)
+            for name in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
+        ):
+            self.skipTest("Neo4j is not configured")
+
+    def test_seeded_rule_matches_the_contract(self) -> None:
+        from neo4j import GraphDatabase
+
+        from workshop.hybrid_retrieval import Neo4jConfig
+
+        config = Neo4jConfig.from_environment()
+        with GraphDatabase.driver(
+            config.uri, auth=(config.username, config.password)
+        ) as driver:
+            with driver.session(database=config.database) as session:
+                record = session.run(
+                    graph_setup.RULE_QUERY,
+                    rule_id=contracts.MAX_GUESTS_RULE_ID,
+                ).single()
+
+        self.assertEqual(
+            record["rule_count"],
+            1,
+            f"Expected exactly one {contracts.MAX_GUESTS_RULE_ID} rule node. "
+            "Run 01-graph-build/1.1_build_graph.ipynb to seed it.",
+        )
+        self.assertEqual(
+            record["max_guests"],
+            contracts.MAX_GUESTS,
+            f"The seeded rule allows {record['max_guests']} guests but "
+            f"contracts.MAX_GUESTS is {contracts.MAX_GUESTS}. The graph is what "
+            "the reservation command reads, so it is the one that wins; re-seed "
+            "it rather than changing the constant to match.",
+        )
+        self.assertTrue(
+            record["enabled"],
+            "The seeded rule is disabled, so the command would accept an "
+            "over-limit request.",
+        )
 
 
 if __name__ == "__main__":

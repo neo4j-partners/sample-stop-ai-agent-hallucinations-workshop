@@ -17,7 +17,13 @@
 #     "bedrock-agentcore-starter-toolkit",
 #     # Demo 08 (Neo4j graph memory; the notebook self-skips when unconfigured)
 #     "neo4j-agent-memory[bedrock]==0.5.0",
+#     # The modules more than one lab shares. Every notebook imports from it, so
+#     # the runner's environment needs it the same way a lab's .venv does.
+#     "workshop",
 # ]
+#
+# [tool.uv.sources]
+# workshop = { path = "../workshop", editable = true }
 # ///
 """Execute the workshop notebooks without modifying their source files.
 

@@ -66,7 +66,7 @@ PREFIX = os.environ.get("DEMO06_PREFIX", "demo06")
 TAG_KEY = f"{PREFIX}-agentcore"
 TAG_VALUE = "true"
 
-DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5"
 LAMBDA_RUNTIME = "python3.12"
 LAMBDA_ARCH = "arm64"  # Match the ARM64 AgentCore Runtime; Graviton price/perf.
 LAMBDA_HANDLER = "lambda_function.handler"
@@ -449,7 +449,7 @@ def provision_runtime_role(clients: Clients, config: Config) -> str:
     Bedrock invoke is scoped to ``foundation-model/*`` plus the account-scoped
     ``bedrock:<region>:<account>:*`` rather than a single model ARN. This is
     the documented scope, and it is what lets the cross-region inference
-    profile ``us.anthropic.claude-sonnet-4-6`` work: that profile fans out to
+    profile ``us.anthropic.claude-sonnet-5`` work: that profile fans out to
     several foundation-model ARNs across regions, so pinning one ARN would
     break invocation.
     """
