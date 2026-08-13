@@ -96,7 +96,7 @@ CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 #: Exact repo-relative paths only. Never a glob, and never anything under HOME.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILES = [
-    str(_REPO_ROOT / "06-agentcore-boto3-demo" / ".bedrock_agentcore.yaml"),
+    str(_REPO_ROOT / "05-agentcore-deploy" / ".bedrock_agentcore.yaml"),
 ]
 
 
@@ -503,10 +503,10 @@ def discover_codebuild_projects(clients: Clients) -> Iterator[Candidate]:
 
 
 def discover_local_config(_clients: Clients) -> Iterator[Candidate]:
-    # Report each config path independently: an absent one is reported ABSENT by
-    # its own name, so a missing 07 file is not hidden behind a present 06 file
-    # (or vice versa). The old code reported only CONFIG_FILES[0] when none
-    # existed, naming the wrong path for the 07-only case.
+    # Report each config path independently: an absent one is reported ABSENT
+    # under its own name rather than being folded into a sibling's line. The old
+    # code reported only CONFIG_FILES[0] when none existed, which named the
+    # wrong path whenever more than one path was tracked.
     for path in CONFIG_FILES:
         if os.path.isfile(path):
             yield Candidate(

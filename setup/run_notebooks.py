@@ -21,16 +21,17 @@
 # ///
 """Execute the workshop notebooks without modifying their source files.
 
-The default run covers demos 00 through 05. Deployment notebooks and cleanup
-are opt-in because they change AWS resources.
+The default run covers labs 1 through 4 and lab 6. Lab 5 deploys and tears
+down real AWS resources, so both of its gates are opt-in. Lab 0 is a
+credential checklist in a README and has no notebook.
 
 Usage:
     uv run setup/run_notebooks.py
     uv run setup/run_notebooks.py --labs 1
-    uv run setup/run_notebooks.py --labs 2-5
+    uv run setup/run_notebooks.py --labs 1-4
     uv run setup/run_notebooks.py --labs 6
-    uv run setup/run_notebooks.py --labs 7 --include-deploy
-    uv run setup/run_notebooks.py --labs 10 --include-cleanup
+    uv run setup/run_notebooks.py --labs 5 --include-deploy
+    uv run setup/run_notebooks.py --labs 5 --include-cleanup
     uv run setup/run_notebooks.py --keep-output
 """
 
@@ -77,27 +78,56 @@ class Result:
     detail: str = ""
 
 
+#: Every lab is registered here up front, including notebooks that are still
+#: being authored. A registered path that does not exist yet is reported as a
+#: skip with a clear reason and does not affect the exit code, so each lab can
+#: fill in its own entry without every author editing this tuple.
+#:
+#: Lab 0 is a credential checklist in a README rather than a notebook, so it
+#: has no entry.
 NOTEBOOKS = (
     Notebook(
-        "0",
-        REPO_ROOT / "00-getting-started" / "getting_started_strands.ipynb",
+        "1",
+        REPO_ROOT / "01-graph-build" / "1.1_build_graph.ipynb",
     ),
     Notebook(
-        "1",
-        REPO_ROOT / "01-graphrag-demo" / "retrieval_patterns.ipynb",
+        "2",
+        REPO_ROOT / "02-retrieval" / "2.1_vector_retrievers.ipynb",
+    ),
+    Notebook(
+        "2",
+        REPO_ROOT / "02-retrieval" / "2.2_fulltext_retrievers.ipynb",
+    ),
+    Notebook(
+        "2",
+        REPO_ROOT / "02-retrieval" / "2.3_text2cypher.ipynb",
+    ),
+    Notebook(
+        "3",
+        REPO_ROOT / "03-agents-and-tools" / "3.1_strands_primer.ipynb",
+    ),
+    Notebook(
+        "4",
+        REPO_ROOT / "04-grounded-write" / "4.1_reservation_write.ipynb",
+    ),
+    Notebook(
+        "5",
+        REPO_ROOT / "05-agentcore-deploy" / "5.1_agentcore_deploy.ipynb",
+        deploys_resources=True,
+    ),
+    Notebook(
+        "5",
+        REPO_ROOT / "05-agentcore-deploy" / "5.2_teardown.ipynb",
+        deletes_resources=True,
+    ),
+    Notebook(
+        "5",
+        REPO_ROOT / "05-agentcore-deploy" / "5.3_agentcore_walkthrough.ipynb",
+        deploys_resources=True,
     ),
     Notebook(
         "6",
-        REPO_ROOT / "06-agentcore-boto3-demo" / "01_hybrid_retrieval.ipynb",
-    ),
-    Notebook(
-        "8",
-        REPO_ROOT / "08-neo4j-memory-demo" / "inspectable_memory.ipynb",
-    ),
-    Notebook(
-        "10",
-        REPO_ROOT / "10-cleanup" / "cleanup.ipynb",
-        deletes_resources=True,
+        REPO_ROOT / "06-memory" / "6.1_neo4j_agent_memory.ipynb",
     ),
 )
 
@@ -382,17 +412,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--labs",
-        help="Labs to run: '4', '2,4,5', or '2-5'. Default: all.",
+        help="Labs to run: '4', '1,3,4', or '1-4'. Default: all.",
     )
     parser.add_argument(
         "--include-deploy",
         action="store_true",
-        help="Run lab 7, which creates or updates AWS resources.",
+        help="Run lab 5's deploy notebooks, which create AWS resources.",
     )
     parser.add_argument(
         "--include-cleanup",
         action="store_true",
-        help="Run lab 10, which deletes tagged AWS resources.",
+        help="Run lab 5's teardown, which deletes tagged AWS resources.",
     )
     parser.add_argument(
         "--timeout",

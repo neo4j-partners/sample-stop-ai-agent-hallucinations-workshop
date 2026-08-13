@@ -7,22 +7,22 @@
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Stand-alone pre-provisioning for the Demo 06 AgentCore deploy.
+"""Stand-alone pre-provisioning for the Lab 5 AgentCore deploy.
 
 This script creates, inspects, and tears down the slow, privileged
-infrastructure that the Demo 06 deploy sections in
-``06-agentcore-boto3-demo/01_hybrid_retrieval.ipynb`` depend on, mirroring what
-Workshop Studio pre-provisions for hosted participants:
+infrastructure that ``05-agentcore-deploy/5.1_agentcore_deploy.ipynb``
+depends on, mirroring what Workshop Studio pre-provisions for hosted
+participants:
 
 * a Secrets Manager secret holding the Neo4j command credential,
 * three least-privilege IAM roles (reservation Lambda, Gateway, Runtime),
 * the reservation Lambda behind the Gateway,
 * the AgentCore Gateway and its single reservation-request target.
 
-The dependency arrow points one way. This script reads Demo 06 files to package
-the Lambda and to know the contracts; Demo 06 never reads anything under
-``setup/``. Everything that crosses back to the notebook is written to the
-repo-root ``.env`` as a handful of identifiers, nothing more.
+The dependency arrow points one way. This script reads Lab 5 files to package
+the Lambda and the shared package to know the contracts; the labs never read
+anything under ``setup/``. Everything that crosses back to the notebook is
+written to the repo-root ``.env`` as a handful of identifiers, nothing more.
 
 Usage:
     uv run setup/provision_agentcore.py provision
@@ -52,13 +52,14 @@ from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEMO_DIR = REPO_ROOT / "06-agentcore-boto3-demo"
-DEPLOY_TOOLS = DEMO_DIR / "deployment-tools"
+DEPLOY_DIR = REPO_ROOT / "05-agentcore-deploy"
+WRITE_PATH_DIR = REPO_ROOT / "04-grounded-write"
+DEPLOY_TOOLS = DEPLOY_DIR / "deployment-tools"
 LAMBDA_SRC = DEPLOY_TOOLS / "lambda_tools" / "create_reservation_request"
 GATEWAY_MANIFEST = DEPLOY_TOOLS / "gateway_target.json"
 ENV_FILE = REPO_ROOT / ".env"
 
-# Shared modules the Lambda wrapper imports at run time. They live in the demo
+# Shared modules the Lambda wrapper imports at run time. They live in the lab
 # root, not next to the wrapper, so the packaging step copies them in.
 SHARED_MODULES = ("reservation_command.py", "contracts.py")
 
@@ -628,7 +629,7 @@ def build_lambda_zip(build_dir: Path) -> bytes:
         (LAMBDA_SRC / "lambda_function.py").read_bytes()
     )
     for module in SHARED_MODULES:
-        (package_dir / module).write_bytes((DEMO_DIR / module).read_bytes())
+        (package_dir / module).write_bytes((WRITE_PATH_DIR / module).read_bytes())
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

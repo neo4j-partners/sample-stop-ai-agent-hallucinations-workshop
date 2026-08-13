@@ -21,9 +21,9 @@ Three already-landed fixes are pinned here:
 
 Run with::
 
-    python -m unittest discover -s 01-graphrag-demo -v
+    python -m unittest discover -s 01-graph-build -v
 
-or collect the whole file with ``pytest 01-graphrag-demo/test_bedrock_providers.py``.
+or collect the whole file with ``pytest 01-graph-build/test_bedrock_providers.py``.
 """
 
 from __future__ import annotations

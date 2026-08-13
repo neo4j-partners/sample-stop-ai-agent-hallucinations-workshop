@@ -34,7 +34,15 @@ class Demo06ContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
 
     def test_committed_tool_schemas_match_python_contracts(self) -> None:
-        schema_path = Path(__file__).parent / "tool_schemas" / "tools.json"
+        # The schemas ship with the deployment, which lives in Lab 5, while the
+        # Python contracts they must match live here in Lab 4. The two labs came
+        # out of one folder, so this assertion now crosses a folder boundary.
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "05-agentcore-deploy"
+            / "tool_schemas"
+            / "tools.json"
+        )
         tools = json.loads(schema_path.read_text(encoding="utf-8"))
 
         self.assertEqual(

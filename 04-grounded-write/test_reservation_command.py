@@ -209,8 +209,11 @@ class ReservationCommandTests(unittest.TestCase):
         self.assertNotIn("do-not-log", rendered)
 
     def test_packaged_lambda_entrypoint_resolves_shared_handler(self):
+        # The Lambda entrypoint ships with Lab 5's deployment; the handler it
+        # must resolve to is defined here in Lab 4.
         path = (
-            Path(__file__).parent
+            Path(__file__).resolve().parent.parent
+            / "05-agentcore-deploy"
             / "deployment-tools"
             / "lambda_tools"
             / "create_reservation_request"

@@ -10,7 +10,7 @@ shape and asserts none of those roles is selected.
 
 Run with::
 
-    python -m unittest discover -s 10-cleanup -v
+    python -m unittest discover -s 05-agentcore-deploy -v
 """
 
 from __future__ import annotations
