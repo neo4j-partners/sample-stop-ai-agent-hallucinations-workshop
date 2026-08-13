@@ -1,4 +1,4 @@
+# The shared package brings boto3, neo4j, and python-dotenv.
+-e ../workshop
+
 neo4j-agent-memory[bedrock]==0.5.0
-boto3>=1.35.0
-neo4j>=5.28.0
-python-dotenv>=1.0.1

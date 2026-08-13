@@ -22,7 +22,7 @@ from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.retrievers import HybridCypherRetriever
 from neo4j_graphrag.types import HybridSearchRanker, RetrieverResultItem
 
-import contracts
+from workshop import contracts
 
 MAX_EVIDENCE_CHARS = 1_200
 MAX_EXACT_TERMS = 20

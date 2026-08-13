@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from typing import get_type_hints
 
-import contracts
+from workshop import contracts
 
 
 class Demo06ContractTests(unittest.TestCase):

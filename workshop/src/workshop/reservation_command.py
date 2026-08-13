@@ -23,7 +23,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from neo4j import Driver, GraphDatabase, Transaction
 from neo4j.exceptions import AuthError, ConstraintError, DriverError, Neo4jError
 
-import contracts
+from workshop import contracts
 
 LOGGER = logging.getLogger(__name__)
 

@@ -11,8 +11,7 @@ from unittest.mock import Mock, patch
 
 from neo4j_graphrag.types import HybridSearchRanker, RetrieverResultItem
 
-import contracts
-import hybrid_retrieval
+from workshop import contracts, hybrid_retrieval
 
 
 class HybridRetrievalTests(unittest.TestCase):

@@ -1,20 +1,30 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Frozen service and graph contracts for Demo 06.
+"""Frozen service and graph contracts for the grounded write path.
 
 This module intentionally contains no AWS or Neo4j clients. It is safe to
 import from local tests, notebooks, the Runtime package, and the reservation
-Lambda without causing network calls or resource changes.
+Lambda without causing network calls or resource changes. `retrieval_contract`,
+the one thing it does import, is pure constants and keeps that property.
+
+The five embedding and index names are re-exported rather than redefined. Lab 1
+writes the embeddings and creates the indexes; Lab 4 reads them. A second
+definition here would let a reader change the index name in one file, pass every
+test in that file's lab, and leave the write path pointed at an index the build
+never created.
 """
 
 from enum import StrEnum
 from typing import Final, Literal, NotRequired, TypedDict
 
-EMBEDDING_MODEL_ID: Final = "amazon.nova-2-multimodal-embeddings-v1:0"
-EMBEDDING_PURPOSE: Final = "GENERIC_INDEX"
-EMBEDDING_DIMENSIONS: Final = 1024
-CHUNK_VECTOR_INDEX: Final = "hotel_chunk_embeddings"
-CHUNK_FULLTEXT_INDEX: Final = "hotel_chunk_fulltext"
+from workshop.retrieval_contract import (
+    CHUNK_FULLTEXT_INDEX as CHUNK_FULLTEXT_INDEX,
+    CHUNK_VECTOR_INDEX as CHUNK_VECTOR_INDEX,
+    EMBEDDING_DIMENSIONS as EMBEDDING_DIMENSIONS,
+    EMBEDDING_MODEL_ID as EMBEDDING_MODEL_ID,
+    EMBEDDING_PURPOSE as EMBEDDING_PURPOSE,
+)
+
 HYBRID_RANKER: Final = "NAIVE"
 HYBRID_TOP_K: Final = 5
 MAX_AMENITIES: Final = 12

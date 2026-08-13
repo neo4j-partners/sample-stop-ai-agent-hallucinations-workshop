@@ -23,7 +23,7 @@ from strands.hooks.registry import HookProvider, HookRegistry
 from strands.models import BedrockModel
 from strands.tools.mcp.mcp_client import MCPClient
 
-from hybrid_retrieval import (
+from workshop.hybrid_retrieval import (
     GROUNDING_INSTRUCTIONS,
     search_hotel_knowledge as _search_hotel_knowledge,
 )

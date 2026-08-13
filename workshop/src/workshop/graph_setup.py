@@ -20,7 +20,7 @@ from uuid import UUID
 from dotenv import load_dotenv
 from neo4j import Driver, GraphDatabase
 
-import contracts
+from workshop import contracts
 
 MANIFEST_PATH = Path(__file__).parent / "fixtures" / "hotel_ids.json"
 HERO_SOURCE = "hotel-cairo-001.txt"

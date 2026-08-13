@@ -15,11 +15,11 @@ from typing import Any, Iterable, Mapping
 from neo4j import Driver
 from neo4j_graphrag.indexes import create_fulltext_index, create_vector_index
 
-from graph_config import (
+from workshop.graph_schema import SCHEMA_NODE_LABELS
+from workshop.retrieval_contract import (
     CHUNK_FULLTEXT_INDEX,
     CHUNK_VECTOR_INDEX,
     EMBEDDING_DIMENSIONS,
-    SCHEMA_NODE_LABELS,
 )
 
 DEMO_CRITICAL_SOURCE_FILES = (

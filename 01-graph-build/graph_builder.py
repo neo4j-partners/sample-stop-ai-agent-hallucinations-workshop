@@ -29,18 +29,19 @@ from neo4j_graphrag.experimental.components.text_splitters.fixed_size_splitter i
 )
 from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
 
-from bedrock_providers import BedrockEmbeddings, BedrockLLM
 from graph_config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     EXTRACTION_MAX_TOKENS,
+)
+from workshop.bedrock_providers import BedrockEmbeddings, BedrockLLM
+from workshop.graph_connection import NEO4J_URI, neo4j_auth
+from workshop.graph_schema import (
     GRAPH_SCHEMA,
-    NEO4J_URI,
     OFF_SCHEMA_LABELS,
     SCHEMA_NODE_LABELS,
-    neo4j_auth,
 )
-from retrieval_setup import (
+from workshop.retrieval_setup import (
     ensure_retrieval_indexes,
     missing_source_fixtures,
     report_readiness,

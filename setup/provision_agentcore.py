@@ -53,15 +53,14 @@ from botocore.exceptions import ClientError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_DIR = REPO_ROOT / "05-agentcore-deploy"
-WRITE_PATH_DIR = REPO_ROOT / "04-grounded-write"
 DEPLOY_TOOLS = DEPLOY_DIR / "deployment-tools"
 LAMBDA_SRC = DEPLOY_TOOLS / "lambda_tools" / "create_reservation_request"
 GATEWAY_MANIFEST = DEPLOY_TOOLS / "gateway_target.json"
 ENV_FILE = REPO_ROOT / ".env"
 
-# Shared modules the Lambda wrapper imports at run time. They live in the lab
-# root, not next to the wrapper, so the packaging step copies them in.
-SHARED_MODULES = ("reservation_command.py", "contracts.py")
+# The Lambda wrapper imports `workshop.reservation_command`, so the packaging
+# step installs this package rather than copying named files.
+SHARED_PACKAGE = REPO_ROOT / "workshop"
 
 PREFIX = os.environ.get("DEMO06_PREFIX", "demo06")
 TAG_KEY = f"{PREFIX}-agentcore"
@@ -595,9 +594,18 @@ def build_lambda_zip(build_dir: Path) -> bytes:
       present in the Lambda Python runtime, so bundling them only bloats the
       package.
 
-    The three first-party source files (the wrapper plus the shared
-    ``reservation_command.py`` and ``contracts.py``) are copied in at the zip
-    root so ``lambda_function.handler`` resolves its imports.
+    The shared ``workshop`` package is installed as a second step, with
+    ``--no-deps`` and no platform target. Both flags are deliberate. It is pure
+    Python, so no platform-specific wheel exists to target, and its declared
+    dependencies are the union of what all nine of its modules need, including
+    ``neo4j-graphrag``, which the reservation Lambda never imports. Resolving
+    them here would put tens of megabytes into a package that needs ``neo4j``
+    and nothing else. ``neo4j`` is already installed by the step above, from the
+    Lambda's own ``requirements.txt``.
+
+    The wrapper module itself is copied to the zip root, since
+    ``lambda_function.handler`` is the configured entry point and has to sit
+    where the runtime looks for it.
     """
     platform_tag = (
         "aarch64-manylinux2014" if LAMBDA_ARCH == "arm64" else "x86_64-manylinux2014"
@@ -624,12 +632,25 @@ def build_lambda_zip(build_dir: Path) -> bytes:
         check=True,
     )
 
-    # Copy first-party sources to the package root next to the dependencies.
+    log("  installing the shared workshop package")
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--no-deps",
+            "--target",
+            str(package_dir),
+            str(SHARED_PACKAGE),
+        ],
+        check=True,
+    )
+
+    # The entry point module goes at the zip root, where the runtime looks for
+    # it. Everything it imports now lives in the installed `workshop` package.
     (package_dir / "lambda_function.py").write_bytes(
         (LAMBDA_SRC / "lambda_function.py").read_bytes()
     )
-    for module in SHARED_MODULES:
-        (package_dir / module).write_bytes((WRITE_PATH_DIR / module).read_bytes())
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:

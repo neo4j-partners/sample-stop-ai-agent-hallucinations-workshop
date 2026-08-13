@@ -34,25 +34,26 @@ import time
 import unittest
 from pathlib import Path
 
-# The module under test lives beside this file rather than on an installed
-# package path, so make the sibling directory importable regardless of how the
-# suite is launched (``unittest`` discovery, a direct path, or pytest).
+# ``graph_builder`` is Lab 1's own module, not part of the shared package, so
+# the sibling directory has to be importable regardless of how the suite is
+# launched (``unittest`` discovery, a direct path, or pytest).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from neo4j_graphrag.llm.base import LLMResponse  # noqa: E402
 from neo4j_graphrag.message_history import InMemoryMessageHistory  # noqa: E402
 from neo4j_graphrag.types import LLMMessage  # noqa: E402
 
-from bedrock_providers import (  # noqa: E402
+from workshop.bedrock_providers import (  # noqa: E402
     BedrockEmbeddings,
     BedrockLLM,
     _converse_messages,
 )
 
 # ``DOC_TIMEOUT_SECONDS`` is imported lazily inside the one test that needs it:
-# ``graph_builder`` pulls in ``graph_config``, which raises at import when
-# ``NEO4J_PASSWORD`` is unset. Importing it here would fail collection for the
-# whole file, including the F2 and F3 guards that never touch Neo4j.
+# ``graph_builder`` pulls in ``workshop.graph_connection``, which raises at
+# import when ``NEO4J_PASSWORD`` is unset. Importing it here would fail
+# collection for the whole file, including the F2 and F3 guards that never
+# touch Neo4j.
 
 
 class TestConverseMessages(unittest.TestCase):

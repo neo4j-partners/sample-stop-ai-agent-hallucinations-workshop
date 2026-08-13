@@ -22,7 +22,7 @@ from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.message_history import MessageHistory
 from neo4j_graphrag.types import LLMMessage
 
-from retrieval_contract import (
+from workshop.retrieval_contract import (
     EMBEDDING_DIMENSIONS,
     EMBEDDING_MODEL_ID,
     EMBEDDING_PURPOSE,

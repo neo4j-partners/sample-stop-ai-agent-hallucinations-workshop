@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Regression tests for Demo 01b's deterministic preparation contract."""
+"""Regression tests for Lab 1's deterministic preparation contract."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ import unittest
 from pathlib import Path
 
 os.environ.setdefault("NEO4J_PASSWORD", "test-only")
+# `graph_config` is Lab 1's own module, so it is reached by path rather than by
+# package name. Everything else now comes from the installed `workshop` package.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from graph_config import select_lite_files  # noqa: E402
-from retrieval_contract import (  # noqa: E402
+from workshop.retrieval_contract import (  # noqa: E402
     CHUNK_FULLTEXT_INDEX,
     CHUNK_VECTOR_INDEX,
     EMBEDDING_DIMENSIONS,
 )
-from retrieval_setup import (  # noqa: E402
+from workshop.retrieval_setup import (  # noqa: E402
     _index_contract_problems,
     missing_source_fixtures,
 )

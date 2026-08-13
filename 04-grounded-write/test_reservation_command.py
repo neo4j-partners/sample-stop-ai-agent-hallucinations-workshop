@@ -12,8 +12,7 @@ from unittest.mock import patch
 
 from neo4j.exceptions import AuthError, ConstraintError, ServiceUnavailable
 
-import contracts
-import reservation_command
+from workshop import contracts, reservation_command
 
 REQUEST_ID = "1f90b477-12a4-4654-8321-c3db6af26d4e"
 HOTEL_ID = "81393d51-1df3-4f53-b58e-e4cda9736fd7"

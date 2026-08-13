@@ -1,0 +1,5 @@
+# Lab 5 deploys what Lab 4 built, so it needs the same shared package.
+-e ../workshop
+
+bedrock-agentcore-starter-toolkit
+strands-agents>=1.27.0

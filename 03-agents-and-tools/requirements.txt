@@ -1,2 +1,4 @@
+# The shared package brings the retriever this lab puts behind @tool.
+-e ../workshop
+
 strands-agents>=1.27.0
-boto3>=1.35.0

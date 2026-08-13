@@ -1,0 +1,32 @@
+[project]
+name = "workshop"
+version = "0.1.0"
+description = "Modules shared by more than one lab of the Neo4j/AWS agent-grounding workshop"
+requires-python = ">=3.12"
+license = { text = "MIT-0" }
+
+# The union of what the nine modules import. A lab installs this package and
+# then adds only what that lab alone needs, such as strands-agents in Lab 3 or
+# neo4j-agent-memory in Lab 6.
+#
+# The reservation Lambda installs this package with --no-deps and resolves
+# neo4j from its own requirements.txt, so nothing here reaches the deployment
+# package. See setup/provision_agentcore.py:build_lambda_zip.
+dependencies = [
+    "boto3>=1.35.0",
+    "neo4j>=5.28.0,<7.0.0",
+    "neo4j-graphrag>=1.18.0",
+    "python-dotenv>=1.0.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workshop"]
+
+# `graph_setup.MANIFEST_PATH` resolves relative to the module, so the fixture
+# manifest has to be installed beside it rather than left in the source tree.
+[tool.hatch.build.targets.wheel.force-include]
+"src/workshop/fixtures/hotel_ids.json" = "workshop/fixtures/hotel_ids.json"

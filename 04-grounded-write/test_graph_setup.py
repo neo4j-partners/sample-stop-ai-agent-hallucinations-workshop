@@ -7,8 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import contracts
-import graph_setup
+from workshop import contracts, graph_setup
 
 
 class GraphSetupTests(unittest.TestCase):

@@ -16,7 +16,7 @@ load_dotenv()
 
 from graph_builder import connect, run_build  # noqa: E402
 from graph_config import select_lite_files  # noqa: E402
-from retrieval_setup import (  # noqa: E402
+from workshop.retrieval_setup import (  # noqa: E402
     ReadinessError,
     ensure_retrieval_indexes,
     report_readiness,

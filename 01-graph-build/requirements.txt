@@ -1,9 +1,4 @@
-strands-agents>=1.27.0
-boto3>=1.35.0
-numpy>=1.24.0
-neo4j>=5.28.0
-neo4j-graphrag>=1.18.0
-python-dotenv>=1.0.1
+# The shared package brings boto3, neo4j, neo4j-graphrag, and python-dotenv.
+-e ../workshop
 
-# --- Local alternative (no AWS needed) ---
-# sentence-transformers>=3.4.0  # Uncomment to use all-MiniLM-L6-v2 instead of Bedrock
+numpy>=1.24.0

@@ -6,21 +6,27 @@
 rule the graph is seeded with, and the rule the readiness check validates
 against. Those three must agree, and the way they agree is that
 `graph_setup.py` refers to the constant instead of repeating the number.
-A literal `10` in the seeding call would pass every other test in the demo
+A literal `10` in the seeding call would pass every other test in this lab
 and still leave a participant's graph disagreeing with the command.
 
-Lab 4 extends this with an assertion against the `Rule` node in a live
-graph, which is the only check that catches a graph seeded by an older
-version of this code.
+This reads the source rather than the running module because a literal and a
+constant reference evaluate to the same `10` at runtime. Only the source
+distinguishes them, and only the source drifts.
+
+The notebook adds the check this cannot make: an assertion against the `Rule`
+node in a live graph, which is the only thing that catches a graph seeded by
+an older version of this code.
 """
 
 import ast
 import unittest
 from pathlib import Path
 
-import contracts
+from workshop import contracts, graph_setup
 
-GRAPH_SETUP = Path(__file__).resolve().parent / "graph_setup.py"
+# Located through the imported module rather than by a relative path, so this
+# keeps working wherever the shared package is installed from.
+GRAPH_SETUP = Path(graph_setup.__file__).resolve()
 
 CONTRACT_REFERENCE = "contracts.MAX_GUESTS"
 
