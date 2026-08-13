@@ -3,3 +3,10 @@
 
 bedrock-agentcore-starter-toolkit
 strands-agents>=1.27.0
+
+# deployment-tools/booking_agent.py is the file that ships into the image, but a
+# facilitator reads and edits it with this venv active. Declaring its two
+# remaining imports here keeps them resolved locally. They are pinned for the
+# image separately, in deployment-tools/agent_requirements.txt.
+bedrock-agentcore>=1.1.0
+mcp>=1.9.0

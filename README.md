@@ -46,7 +46,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 
 Only Lab 6 is optional. `2.3_text2cypher.ipynb` and `5.3_agentcore_walkthrough.ipynb` are optional notebooks inside required labs.
 
-> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass the offline gate, where each live cell self-skips without credentials, and their run against real AWS resources is tracked in `new-content-plan.md` Phase 8.
+> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass both gates: the offline one, where each live cell self-skips without credentials, and a full run against real AWS resources, which deployed the agent to AgentCore Runtime, passed four smoke questions, and then tore everything down to nothing. `new-content-plan.md` Phase 8 holds the evidence.
 
 ## Why this order
 
@@ -150,7 +150,7 @@ Each lab keeps its own `requirements.txt`, and each one installs the shared pack
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
-- An AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access, with Claude Sonnet 5 and Amazon Nova 2 Multimodal Embeddings enabled in your region
+- An AWS account with [Amazon Bedrock](https://aws.amazon.com/bedrock/) access, with `us.anthropic.claude-sonnet-5` and `amazon.nova-2-multimodal-embeddings-v1:0` enabled in your region. Optional Lab 6 needs a third, `amazon.titan-embed-text-v2:0`, which is what the memory graph embeds with; Labs 1 through 5 never touch it
 - One Neo4j Aura instance
 
 Start with [`00-setup/README.md`](00-setup/README.md), which is the credential checklist. It is a README rather than a notebook because nothing needs executing yet.
@@ -214,11 +214,11 @@ This creates real, billable AWS resources. `5.2_teardown.ipynb` removes what Lab
 This repository strips notebook output on commit through a git filter declared in `.gitattributes`. Register the filter once after cloning, or every `.ipynb` checkout runs against an undefined filter:
 
 ```bash
-pip install nbstripout
+uv tool install nbstripout
 nbstripout --install
 ```
 
-Run both commands from the repository root.
+Run both commands from the repository root. Only contributors need this. Running the labs does not.
 
 ---
 
@@ -251,8 +251,9 @@ Every lab loads the nearest `.env` first, so a `.env` inside a lab folder takes 
 1. Go to [console.neo4j.io](https://console.neo4j.io) and create a free **AuraDB** instance
 2. Download the credentials file when prompted; it contains your URI, username, and password
 3. Fill in the repo-root `.env` created above with those values
-4. Enable the **APOC** plugin in your Aura instance settings
-5. Run Lab 1 to populate the graph
+4. Run Lab 1 to populate the graph
+
+APOC Core is preinstalled on every Aura instance, so there is no plugin to enable. Lab 1's graph build uses it and finds it already there. A self-hosted Neo4j is the only case that needs the plugin installed by hand.
 
 **Nothing ships pre-embedded.** Only the raw hotel-FAQ corpus, `01-graph-build/hotel-faqs.zip`, is checked into git. The graph is a build artifact that every participant generates in Lab 1: 30 documents in about 15 minutes for the lite build, or 300 documents in about 2 hours for the full build.
 
@@ -288,7 +289,9 @@ Yes. Every lab uses Amazon Bedrock, for extraction and embeddings in Lab 1 and f
 
 ### How long does each lab take?
 
-Lab 1 is dominated by the graph build: about 15 minutes for the lite corpus. Labs 2 through 4 are notebook-paced. Lab 5 creates and deletes real AWS infrastructure and is the longest of the rest. A rehearsed per-lab time budget is still outstanding.
+Lab 1 is dominated by the graph build: about 15 minutes for the lite corpus. Labs 2 through 4 are notebook-paced. Lab 5 creates and deletes real AWS infrastructure and is the longest of the rest.
+
+Machine execution time is measured, and it is a floor rather than a budget. All seven notebooks outside Lab 5 execute in 311 seconds against a graph that is already built: `1.1` 7.7s on the already-complete path, `2.1` 18.3s, `2.2` 39.9s, `2.3` 17.0s, `3.1` 89.4s, `4.1` 33.5s, `6.1` 105.4s. That says nothing about reading, discussion, or a participant sorting out their own credentials. A rehearsed participant-facing budget is still outstanding.
 
 ### What LLM providers are supported?
 
@@ -298,9 +301,9 @@ Every lab defaults to Amazon Bedrock with Claude Sonnet 5, and works with any pr
 
 ## Common issues and how to fix them
 
-**Bedrock access denied:** ensure the model, `us.anthropic.claude-sonnet-5` or similar, is enabled in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess). Lab 1 also needs `amazon.nova-2-multimodal-embeddings-v1:0`.
+**Bedrock access denied:** enable the model in your region via the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), and confirm `AWS_REGION` in the repo-root `.env` names that same region. Three models are involved and access to one proves nothing about the others: `us.anthropic.claude-sonnet-5` for reasoning and Lab 1's extraction, `amazon.nova-2-multimodal-embeddings-v1:0` for the chunk vectors Lab 1 writes and Lab 2 onward query, and `amazon.titan-embed-text-v2:0` for optional Lab 6's memory embeddings.
 
-**Neo4j connection fails:** verify `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` are set in your `.env` file and that APOC is enabled on your Aura instance.
+**Neo4j connection fails:** verify `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` are set in your `.env` file. `NEO4J_DATABASE` is optional and defaults to `neo4j`, which is what Aura provisions.
 
 **Lab 2 returns nothing:** the graph is missing or was built with different embedding settings. Re-run Lab 1. Each Lab 2 notebook opens with a verification cell that names what is absent.
 

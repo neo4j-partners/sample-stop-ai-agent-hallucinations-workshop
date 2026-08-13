@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Focused offline tests for the Demo 06 hybrid retrieval boundary."""
+"""Focused offline tests for the Lab 4 hybrid retrieval boundary."""
 
 import inspect
 import io
@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from neo4j_graphrag.types import HybridSearchRanker, RetrieverResultItem
 
-from workshop import contracts, hybrid_retrieval
+from workshop import bedrock_providers, contracts, hybrid_retrieval
 
 
 class HybridRetrievalTests(unittest.TestCase):
@@ -223,7 +223,7 @@ class HybridRetrievalTests(unittest.TestCase):
         client.invoke_model.return_value = {
             "body": io.BytesIO(json.dumps({"embeddings": [{"embedding": [0.1]}]}).encode())
         }
-        embedder = hybrid_retrieval.NovaEmbeddings(bedrock_client=client)
+        embedder = bedrock_providers.BedrockEmbeddings(bedrock_client=client)
 
         self.assertEqual(embedder.embed_query("Cairo"), [0.1])
 

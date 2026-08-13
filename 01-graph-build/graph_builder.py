@@ -3,8 +3,8 @@
 """Shared knowledge-graph build machinery for the Graph-RAG demo.
 
 `build_graph.py` and `build_graph_lite.py` differ only in which documents they
-feed in. Everything else — the pinned schema, the canary check, the scoped
-wipe, the verification queries — lives here so the two paths cannot drift apart
+feed in. Everything else, the pinned schema, the canary check, the scoped wipe,
+and the verification queries, lives here so the two paths cannot drift apart
 the way they previously did (one verified on `h.id`, the other on `h.name`,
 and neither matched the notebook).
 
@@ -13,7 +13,7 @@ Build order matters and is deliberate:
     wipe -> canary (3 docs) -> verify typing -> wipe canary -> ingest all -> report
 
 The wipe happens *before* the canary. The graph this script builds is
-disposable — it is rebuilt from scratch on every run — so there is nothing
+disposable, rebuilt from scratch on every run, so there is nothing
 worth preserving across a failed build. Wiping first also means the canary
 runs against an empty graph, so entity resolution has nothing to merge into
 and the check reflects exactly what this run extracted.
@@ -47,7 +47,7 @@ from workshop.retrieval_setup import (
     report_readiness,
 )
 
-# Must sit above the worst case of the Bedrock retry chain (see F16 /
+# Must sit above the worst case of the Bedrock retry chain (see
 # bedrock_providers.BEDROCK_CONFIG): 3 attempts x 45s + backoff = ~135s < 180s.
 DOC_TIMEOUT_SECONDS = 180
 
@@ -231,9 +231,10 @@ def check_schema_held(driver: Driver, chunk_ids: set[str]) -> list[str]:
 def count_documents(driver: Driver) -> int:
     """Return the number of :Document nodes in the graph.
 
-    B17's invariant: after a clean build this equals the number of files that
-    were processed. Anything else means two builds overlapped or a partial run
-    was left behind, and the resulting graph looks plausible while being wrong.
+    The invariant: after a clean build this equals the number of source files
+    that were processed. Anything else means two builds overlapped or a partial
+    run was left behind, and the resulting graph looks plausible while being
+    wrong.
     """
     with driver.session() as session:
         return session.run(
@@ -312,7 +313,7 @@ def report(driver: Driver) -> None:
         found = False
         for record in rows:
             found = True
-            print(f"    {record['name']} — {record['rating']}")
+            print(f"    {record['name']}: {record['rating']}")
         if not found:
             print("    (none)")
 
@@ -325,7 +326,7 @@ async def run_build(paths: list[Path], title: str) -> int:
 
     missing_sources = missing_source_fixtures(paths)
     if missing_sources:
-        print("Demo-critical source documents are missing from this build:")
+        print("Source documents that later labs depend on are missing from this build:")
         for filename in missing_sources:
             print(f"  - {filename}")
         return 1
@@ -333,7 +334,7 @@ async def run_build(paths: list[Path], title: str) -> int:
     print(f"{title}: {len(paths)} documents\n")
     driver = connect()
     try:
-        print("Clearing this demo's previous graph...")
+        print("Clearing the previous graph this lab built...")
         clear_demo_graph(driver)
         print("✅ Cleared\n")
 
@@ -346,7 +347,7 @@ async def run_build(paths: list[Path], title: str) -> int:
 
         new_chunks = snapshot_chunk_ids(driver) - baseline
         if not new_chunks:
-            print("\n❌ Canary produced no :Chunk — extraction did not run.")
+            print("\n❌ Canary produced no :Chunk. Extraction did not run.")
             clear_demo_graph(driver)  # leave a clean, empty graph on failure
             return 1
         problems = check_schema_held(driver, new_chunks)
@@ -394,13 +395,13 @@ async def run_build(paths: list[Path], title: str) -> int:
                 "graph fixture validation."
             )
 
-        print("\nCreating and verifying Demo 01b retrieval indexes...")
+        print("\nCreating and verifying the retrieval indexes...")
         ensure_retrieval_indexes(driver)
         print("✅ Retrieval indexes are online and match the embedding contract")
 
         readiness_problems = report_readiness(driver, expected_documents=expected)
         if readiness_problems:
-            print("\n❌ Demo-critical fixture validation failed:")
+            print("\n❌ Fixture validation for the later labs failed:")
             for problem in readiness_problems:
                 print(f"  - {problem}")
             return 1

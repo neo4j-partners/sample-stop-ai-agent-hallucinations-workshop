@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Fixed graph-enriched hybrid retrieval for Demo 06.
+"""Fixed graph-enriched hybrid retrieval for Lab 2 onward.
 
 The public tool accepts only ``query``. Index names, fusion behavior, result
 count, and graph traversal are deliberately fixed rather than caller-tunable.
@@ -16,17 +16,16 @@ from functools import lru_cache
 from typing import Any, Mapping
 
 import boto3
-from botocore.config import Config
 from neo4j import GraphDatabase
 from neo4j_graphrag.embeddings.base import Embedder
 from neo4j_graphrag.retrievers import HybridCypherRetriever
 from neo4j_graphrag.types import HybridSearchRanker, RetrieverResultItem
 
 from workshop import contracts
+from workshop.bedrock_providers import BedrockEmbeddings
 
 MAX_EVIDENCE_CHARS = 1_200
 MAX_EXACT_TERMS = 20
-BEDROCK_CONFIG = Config(read_timeout=45, retries={"max_attempts": 2})
 
 GROUNDING_INSTRUCTIONS = """
 Answer hotel questions only from the returned chunk evidence and graph fields.
@@ -83,7 +82,7 @@ class Neo4jConfig:
     @classmethod
     def from_environment(cls) -> "Neo4jConfig":
         """Load a participant's Aura connection from local environment values."""
-        values = {name: os.environ.get(name) for name in contracts.LOCAL_NEO4J_ENV}
+        values = {name: os.environ.get(name) for name in contracts.REQUIRED_NEO4J_ENV}
         missing = [name for name, value in values.items() if not value]
         if missing:
             names = ", ".join(missing)
@@ -92,7 +91,8 @@ class Neo4jConfig:
             uri=values["NEO4J_URI"] or "",
             username=values["NEO4J_USERNAME"] or "",
             password=values["NEO4J_PASSWORD"] or "",
-            database=values["NEO4J_DATABASE"] or "",
+            database=os.environ.get("NEO4J_DATABASE")
+            or contracts.DEFAULT_NEO4J_DATABASE,
         )
 
     @classmethod
@@ -113,42 +113,6 @@ class Neo4jConfig:
             names = ", ".join(missing)
             raise ValueError(f"Neo4j secret is missing required fields: {names}")
         return cls(**{name: secret[name] for name in contracts.SECRET_FIELDS})
-
-
-class NovaEmbeddings(Embedder):
-    """Query embedder matching the Nova vectors stored on ``:Chunk`` nodes."""
-
-    def __init__(
-        self,
-        *,
-        bedrock_client: Any | None = None,
-        region_name: str | None = None,
-    ) -> None:
-        region = region_name or os.environ.get("AWS_REGION", "us-east-1")
-        self.client = bedrock_client or boto3.client(
-            "bedrock-runtime",
-            region_name=region,
-            config=BEDROCK_CONFIG,
-        )
-
-    def embed_query(self, text: str) -> list[float]:
-        """Embed one query using the frozen model, purpose, and dimensions."""
-        body = {
-            "taskType": "SINGLE_EMBEDDING",
-            "singleEmbeddingParams": {
-                "embeddingPurpose": contracts.EMBEDDING_PURPOSE,
-                "embeddingDimension": contracts.EMBEDDING_DIMENSIONS,
-                "text": {"truncationMode": "END", "value": text},
-            },
-        }
-        response = self.client.invoke_model(
-            modelId=contracts.EMBEDDING_MODEL_ID,
-            body=json.dumps(body),
-            contentType="application/json",
-            accept="application/json",
-        )
-        result = json.loads(response["body"].read())
-        return result["embeddings"][0]["embedding"]
 
 
 @lru_cache(maxsize=2)
@@ -181,13 +145,15 @@ def build_retriever(
     *,
     embedder: Embedder | None = None,
 ) -> HybridCypherRetriever:
-    """Build the one fixed Demo 06 retriever around the cached driver."""
+    """Build the one fixed workshop retriever around the cached driver."""
     return HybridCypherRetriever(
         driver=_get_driver(config),
         vector_index_name=contracts.CHUNK_VECTOR_INDEX,
         fulltext_index_name=contracts.CHUNK_FULLTEXT_INDEX,
         retrieval_query=RETRIEVAL_QUERY,
-        embedder=embedder or NovaEmbeddings(),
+        # The same class Lab 1 wrote the chunk vectors with, so the query and
+        # the stored vectors cannot drift onto different models or widths.
+        embedder=embedder or BedrockEmbeddings(),
         result_formatter=_format_record,
         neo4j_database=config.database,
     )

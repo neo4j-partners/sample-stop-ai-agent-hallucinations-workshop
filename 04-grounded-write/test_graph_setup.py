@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Focused offline tests for Demo 06 graph preparation."""
+"""Focused offline tests for Lab 4 graph preparation."""
 
 import json
 import tempfile

@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Focused offline tests for the Demo 06 Runtime and Gateway boundary."""
+"""Focused offline tests for the Lab 5 Runtime and Gateway boundary."""
 
 import json
 import os
@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import booking_agent
-import contracts
+
+from workshop import contracts
 
 DEMO_DIR = Path(__file__).parent
 

@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Idempotent Neo4j preparation and readiness checks for Demo 06.
+"""Idempotent Neo4j preparation and readiness checks for the Lab 4 fixtures.
 
-This module verifies the indexes owned by Demo 01. It only writes the two
-fixture hotel IDs, ordinary uniqueness constraints, and the Demo 06 rule.
+This module verifies the indexes Lab 1 owns. It only writes the two fixture
+hotel IDs, ordinary uniqueness constraints, and the maximum-guests rule.
 """
 
 from __future__ import annotations
@@ -28,8 +28,14 @@ HERO_NAME = "AnyCompany Cairo Nile View"
 HERO_ADDRESS = "789 Corniche el-Nil, Cairo 11519"
 HERO_RATING = 4.5
 HERO_AMENITY_TERMS = ("pool", "spa", "fitness", "wifi", "restaurant")
-RULE_REJECTION_MESSAGE = "Reservation requests are limited to 10 guests."
-RULE_STEERING_MESSAGE = "Ask for a party size of 10 guests or fewer."
+# Interpolated rather than written out, so the sentence a participant reads
+# cannot drift away from the number the rule is actually enforced against.
+RULE_REJECTION_MESSAGE = (
+    f"Reservation requests are limited to {contracts.MAX_GUESTS} guests."
+)
+RULE_STEERING_MESSAGE = (
+    f"Ask for a party size of {contracts.MAX_GUESTS} guests or fewer."
+)
 
 RESERVATION_REQUEST_PROPERTIES = (
     "request_id",
@@ -225,7 +231,7 @@ def _fixture_problems(
             continue
         if record.get("documents") == 0:
             problems.append(
-                f"{source_filename} has no source Document; rebuild Demo 01 "
+                f"{source_filename} has no source Document; rebuild the Lab 1 graph "
                 "so Document.source_filename is recorded"
             )
         for field in ("documents", "chunks", "hotels"):
@@ -323,15 +329,15 @@ def _session(driver: Driver, database: str):
     return driver.session(database=database)
 
 
-def apply_demo6_graph(
+def apply_lab4_fixtures(
     driver: Driver,
     database: str,
     manifest: FixtureManifest,
 ) -> list[str]:
-    """Apply the idempotent Demo 06 graph-owned data.
+    """Apply the idempotent graph-owned data the Lab 4 write path depends on.
 
     Return any blocking problems that prevent preparation, for example a
-    missing Demo 01 graph. When the returned list is empty, the fixture IDs,
+    missing Lab 1 graph. When the returned list is empty, the fixture IDs,
     constraints, and maximum-guests rule have been applied.
     """
     with _session(driver, database) as session:
@@ -422,13 +428,13 @@ def _configuration() -> tuple[str, tuple[str, str], str]:
 
 def _report(problems: Iterable[str]) -> None:
     """Print the readiness report header and each corrective action."""
-    print("Demo 06 is not ready:")
+    print("Lab 4 fixtures are not ready:")
     for problem in problems:
         print(f"  - {problem}")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare or verify Demo 06 graph data.")
+    parser = argparse.ArgumentParser(description="Prepare or verify the Lab 4 graph fixtures.")
     parser.add_argument(
         "--check-only",
         action="store_true",
@@ -453,7 +459,7 @@ def main() -> int:
     try:
         driver.verify_connectivity()
         if not args.check_only:
-            problems = apply_demo6_graph(driver, database, manifest)
+            problems = apply_lab4_fixtures(driver, database, manifest)
         if not problems:
             problems = readiness_problems(driver, database, manifest)
     finally:
@@ -462,7 +468,7 @@ def main() -> int:
     if problems:
         _report(problems)
         return 1
-    print("Demo 06 graph is ready.")
+    print("Lab 4 fixtures are ready.")
     return 0
 
 

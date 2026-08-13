@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: MIT-0
 """Unit tests for the memory helper module. No database or AWS calls.
 
-Pins the configuration contract the Demo 08 plan locks in: Titan Text
-Embeddings V2 with 1024 dimensions, an explicit Bedrock embedder, an explicit
-target database, extraction off, and multi-tenant enforcement on. Also covers
-the workshop-owned write helpers (provenance edge, ownership marker) against
-a fake driver, and the scoping guarantees of the cleanup Cypher. The live
+Pins the configuration contract this lab depends on: Titan Text Embeddings V2
+with 1024 dimensions, an explicit Bedrock embedder, an explicit target
+database, extraction off, and multi-tenant enforcement on. Also covers the
+workshop-owned write helpers (provenance edge, ownership marker) against a
+fake driver, the scoping guarantees of the cleanup Cypher, and the hotel-count
+guard that makes cleanup refuse to finish if the hotel graph moved. The live
 connect, write, and index checks are exercised by ``smoke_test.py``, not here.
 
-Run with:  uv run --with-requirements requirements.txt python test_memory_helpers.py
+Run with:  uv run --with pytest --with-requirements requirements.txt -m pytest
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from memory_helpers import (
     HOTEL_RELATIONSHIP,
     MEMORY_EMBEDDING_DIMENSIONS,
     MEMORY_EMBEDDING_MODEL,
+    PREFERENCE_CATEGORY_PREFIX,
     PROVENANCE_RELATIONSHIP,
     WORKSHOP_OWNER,
     MemoryDemoConfig,
@@ -101,7 +103,7 @@ class TestLoadConfig(unittest.TestCase):
 
 
 class TestBuildMemorySettings(unittest.TestCase):
-    """The settings pin the contract the Demo 08 plan decisions lock in."""
+    """The settings pin the contract the rest of this lab depends on."""
 
     def setUp(self) -> None:
         self.settings = build_memory_settings(CONFIG)
@@ -312,6 +314,113 @@ class TestTagDemoRecords(unittest.TestCase):
         )
 
 
+class FakeCounters:
+    """The two counters run_cleanup reads off a consumed result."""
+
+    def __init__(self, nodes: int = 0, relationships: int = 0) -> None:
+        self.nodes_deleted = nodes
+        self.relationships_deleted = relationships
+
+
+class FakeSummary:
+    def __init__(self, counters: FakeCounters) -> None:
+        self.counters = counters
+
+
+class FakeCleanupResult:
+    def __init__(
+        self,
+        row: dict | None = None,
+        counters: FakeCounters | None = None,
+    ) -> None:
+        self._row = row
+        self._counters = counters or FakeCounters()
+
+    def single(self) -> dict | None:
+        return self._row
+
+    def consume(self) -> FakeSummary:
+        return FakeSummary(self._counters)
+
+
+class FakeCleanupSession:
+    """Answer COUNT_HOTELS from a scripted list, count deletes for the rest.
+
+    cleanup_memory calls ``session.run(COUNT_HOTELS)`` with no parameters and
+    ``session.run(query, params)`` for the sweeps, so both shapes are handled.
+    """
+
+    def __init__(self, hotel_counts: list[int]) -> None:
+        self.hotel_counts = list(hotel_counts)
+        self.calls: list[tuple[str, dict]] = []
+
+    def __enter__(self) -> "FakeCleanupSession":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+    def run(self, query: str, parameters: dict | None = None):
+        self.calls.append((query, parameters or {}))
+        if query == cleanup_memory.COUNT_HOTELS:
+            return FakeCleanupResult(row={"hotels": self.hotel_counts.pop(0)})
+        return FakeCleanupResult(counters=FakeCounters(nodes=1, relationships=2))
+
+
+class FakeCleanupDriver:
+    def __init__(self, hotel_counts: list[int]) -> None:
+        self.session_obj = FakeCleanupSession(hotel_counts)
+        self.closed = False
+
+    def session(self, database: str | None = None) -> FakeCleanupSession:
+        self.database = database
+        return self.session_obj
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TestCleanupHotelGuard(unittest.TestCase):
+    """The before/after hotel count is what actually protects Lab 1's graph.
+
+    Asserting that the cleanup Cypher does not contain ``DELETE h`` only tests
+    a variable name: ``DETACH DELETE c, m`` would pass that check whatever
+    ``c`` and ``m`` were bound to. This drives the real guard instead.
+    """
+
+    def test_stable_hotel_count_completes(self) -> None:
+        driver = FakeCleanupDriver([12, 12])
+        with mock.patch.object(
+            cleanup_memory.GraphDatabase, "driver", return_value=driver
+        ):
+            self.assertEqual(cleanup_memory.run_cleanup(CONFIG), 0)
+        self.assertTrue(driver.closed)
+        self.assertEqual(driver.database, CONFIG.database)
+
+    def test_changed_hotel_count_raises(self) -> None:
+        driver = FakeCleanupDriver([12, 11])
+        with mock.patch.object(
+            cleanup_memory.GraphDatabase, "driver", return_value=driver
+        ):
+            with self.assertRaises(AssertionError) as ctx:
+                cleanup_memory.run_cleanup(CONFIG)
+        message = str(ctx.exception)
+        self.assertIn("12", message)
+        self.assertIn("11", message)
+        # The driver still has to be released on the failing path.
+        self.assertTrue(driver.closed)
+
+    def test_main_returns_nonzero_when_the_guard_fires(self) -> None:
+        driver = FakeCleanupDriver([12, 13])
+        with mock.patch.object(
+            cleanup_memory, "load_config", return_value=CONFIG
+        ):
+            with mock.patch.object(
+                cleanup_memory.GraphDatabase, "driver", return_value=driver
+            ):
+                self.assertEqual(cleanup_memory.main(), 1)
+
+
 class TestCleanupScoping(unittest.TestCase):
     """The cleanup Cypher can only ever touch demo-owned memory records."""
 
@@ -330,6 +439,37 @@ class TestCleanupScoping(unittest.TestCase):
         self.assertIn("p.workshop_owner = $owner", query)
         self.assertIn("NOT EXISTS", query)
         self.assertIn("HAS_PREFERENCE", query)
+
+    def test_orphaned_preferences_are_also_swept_by_category_prefix(
+        self,
+    ) -> None:
+        # The owner marker is stamped by the notebook's second-to-last cell,
+        # so a run that died earlier never carries it. By the time this query
+        # runs the preceding sweeps have detached every edge that could reach
+        # the node, which leaves the category namespace as the only handle.
+        query = cleanup_memory.DELETE_ORPHANED_DEMO_PREFERENCES
+        self.assertIn("p.category STARTS WITH $category_prefix", query)
+        self.assertEqual(PREFERENCE_CATEGORY_PREFIX, "hotels-demo08-")
+        self.assertTrue(
+            PREFERENCE_CATEGORY_PREFIX.endswith(DEMO_ID_PREFIX),
+            "the preference namespace must track DEMO_ID_PREFIX",
+        )
+
+    def test_cleanup_passes_the_category_prefix_parameter(self) -> None:
+        # A query that names $category_prefix but never receives it fails at
+        # runtime, and only against a live database.
+        driver = FakeCleanupDriver([12, 12])
+        with mock.patch.object(
+            cleanup_memory.GraphDatabase, "driver", return_value=driver
+        ):
+            cleanup_memory.run_cleanup(CONFIG)
+        params = dict(driver.session_obj.calls)[
+            cleanup_memory.DELETE_ORPHANED_DEMO_PREFERENCES
+        ]
+        self.assertEqual(
+            params["category_prefix"], PREFERENCE_CATEGORY_PREFIX
+        )
+        self.assertEqual(params["owner"], WORKSHOP_OWNER)
 
     def test_cleanup_never_mutates_hotel_nodes(self) -> None:
         queries = (

@@ -1,12 +1,13 @@
-# Workshop Architecture, DRAFT under review
+# Workshop Architecture
 
-> **Status: DRAFT under review.** This document is offline documentation only.
-> Nothing here provisions or deletes an AWS resource. It describes the six-lab
-> layout as the repository now stands, and it is reviewed against the root
-> `README.md`, the seven per-lab READMEs, `04-grounded-write/CONTRACTS.md`, and
+> **Status: reviewed.** This document is offline documentation only. Nothing
+> here provisions or deletes an AWS resource. It describes the six-lab layout as
+> the repository now stands, and it is reviewed against the root `README.md`,
+> the seven per-lab READMEs, `04-grounded-write/CONTRACTS.md`, and
 > `05-agentcore-deploy/README.md`. Where a claim could not be checked against a
-> file in the tree, it is marked **unverified** rather than stated as fact. The
-> list of those claims is at the bottom.
+> file in the tree, it is marked **unverified** rather than stated as fact. Three
+> such claims remain, listed at the bottom; the four that Phase 8's live run
+> settled are listed beside them.
 
 The repository is one sequential path of six labs sharing one installable
 package. Three views follow:
@@ -546,27 +547,35 @@ rather than as confirmed facts, because nothing in the tree settles them and
 this document was written without running a notebook, a deploy, or a Cypher
 query.
 
-- **Live behavior of any lab.** Nothing here was executed. `run_notebooks.py
-  --list` was run to confirm the registry, and no notebook was run. The claim
-  that Lab 5 deploys, answers its four smoke questions, and tears down cleanly
-  is the plan's Phase 8 validation step, and `new-content-plan.md` still records
-  Phase 8 as pending.
-- **The four-hour delivery budget and any per-lab timing.** `new-content-plan.md`
-  records Phase 0, the timing probe, and Phase 11, the rehearsal, as both
-  pending. The 15-minute lite build and 2-hour full build figures come from the
-  root README and the plan's assumptions, not from a measured run recorded in
-  the tree.
+- **The four-hour delivery budget.** `new-content-plan.md` Phase 11, the
+  rehearsal, is the one phase still outstanding, so no participant-facing budget
+  has been measured. Machine execution time has been: all seven notebooks
+  outside Lab 5 run in 311 seconds against an already-built graph. That is a
+  floor, not a budget, and says nothing about reading or discussion. The
+  15-minute lite build and 2-hour full build figures still come from the root
+  README rather than from a timed run recorded in the tree.
 - **The 73% hallucination-reduction figure** in the root README's Graph-RAG
   comparison table is cited to arXiv 2503.13514. The citation was not checked.
-- **`5.3_agentcore_walkthrough.ipynb` reading `AGENT_RUNTIME_ARN`.** The file is
-  present and the READMEs describe the handoff, but no run has confirmed the
-  Runtime ARN flows from `5.1` to `5.3`.
-- **Whether the deployed Lambda imports the shared package cleanly.** The plan
-  flags this as the first real test of the packaging change and records it as
-  outstanding.
 - **CloudWatch log group paths and AgentCore trace contents.** Taken from
   `05-agentcore-deploy/README.md` and `5.1_agentcore_deploy.ipynb` prose, not
   observed.
+
+### Claims this document previously carried as unverified, now settled
+
+Phase 8 ran for real and closed four of them. Its validation record is the
+evidence, in `new-content-plan.md`.
+
+- **Live behavior of Lab 5.** Runtime `HotelBookingAgent-i6Jg838kmO` deployed,
+  all four smoke questions passed, and teardown removed all 17 resources,
+  verified independently by the Resource Groups Tagging API returning empty for
+  both owner tags.
+- **`5.3_agentcore_walkthrough.ipynb` reading `AGENT_RUNTIME_ARN`.** It passed
+  all six cells against the live Runtime ARN.
+- **Whether the deployed Lambda imports the shared package cleanly.** It does.
+  The reservation Lambda imported the shared package and ran, which is the first
+  real exercise of the Phase 3 packaging change.
+- **Per-notebook timing.** Phase 0's numbers were measured directly from the
+  finished notebooks rather than from a proxy.
 
 ### Stale references noticed elsewhere, since resolved
 
@@ -581,9 +590,12 @@ no longer cites a Module 7, and `build_graph.py` points its docstring at
 
 The Python floor is now stated one way. `workshop/pyproject.toml` sets
 `requires-python = ">=3.12"` and every lab installs that package with
-`-e ../workshop`, so 3.12+ is the binding floor. The 3.9+ and 3.11+ badges are
-gone from all seven lab READMEs and the root README, because the install commands
-those files document fail on anything older.
+`-e ../workshop`, so 3.12+ is the binding floor. Every Python badge in the tree
+now reads 3.12+, in the root README and in the six lab READMEs that carry one,
+because the install commands those files document fail on anything older. One
+prose line survives outside the badges: `05-agentcore-deploy/README.md:114`
+gives 3.11+ as the floor for `workshop_cleanup.py`, which is true of
+`enum.StrEnum` in isolation but lower than the floor the lab actually installs.
 
 One item on the earlier list was wrong rather than stale.
 `01-graph-build/README.md` says "Nine code cells" and `1.1_build_graph.ipynb` has

@@ -27,6 +27,25 @@ The Neo4j retrieval logic does not change. `deployment-tools/booking_agent.py` i
 
 **The tagging step is what makes teardown possible.** The starter toolkit creates the ECR repository, the CodeBuild project, and the Runtime itself, and it does not forward tags. `5.1_agentcore_deploy.ipynb` tags those three immediately after launch. Skipping that step means `workshop_cleanup.py` reports them as `UNTAGGED_BLOCKED`, refuses to delete them, and exits non-zero, and the infrastructure keeps running and keeps costing money.
 
+### Roughly what it costs
+
+> **Estimate, not a quote.** Figures are US East (N. Virginia) list prices read on 13 August 2026 and rounded hard. They vary by region, and AWS changes them. Check the [AgentCore](https://aws.amazon.com/bedrock/agentcore/pricing/), [Lambda](https://aws.amazon.com/lambda/pricing/), [ECR](https://aws.amazon.com/ecr/pricing/), [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/), and [CodeBuild](https://aws.amazon.com/codebuild/pricing/) pricing pages before quoting a number to anyone. Bedrock model tokens are billed separately and are the same for this lab as for Labs 2 through 4.
+
+The shape of the bill is the thing to understand, and it is not the shape people expect. **AgentCore Runtime has no idle hourly charge.** It bills per session: CPU only while the agent is actually computing, memory per second for the life of the session, and nothing at all between sessions. A deployed Runtime that nobody invokes costs nothing for compute.
+
+| Component | What drives the charge | Rough figure |
+|---|---|---|
+| AgentCore Runtime | Per session, per second. CPU is charged only during active processing, memory for the whole session including I/O wait | Well under a cent per invocation at this agent's size. All four smoke tests together are a fraction of a cent |
+| AgentCore Gateway | $0.005 per 1,000 API invocations, plus $0.02 per 100 tools indexed per month. This lab indexes one tool | Effectively free at workshop volume. Under a cent a month standing |
+| Lambda | Per request and per GB-second. A handful of short invocations | Effectively free, and inside the perpetual free tier |
+| ECR storage | $0.10 per GB-month for the stored image | The image is on the order of 1 to 2 GB, so roughly 10 to 20 cents a month if you leave it |
+| Secrets Manager | $0.40 per secret per month, prorated hourly, plus API calls | One secret, so about $0.40 a month. This is the largest standing charge in the lab |
+| CodeBuild | Per build minute on `arm1.small`, and the first 100 build minutes a month are free tier | A few minutes per deploy, so typically nothing |
+
+**Per full run of Lab 5**, deploy through smoke tests through teardown in one sitting, the AWS infrastructure charges land in the low single-digit cents, dominated by the prorated hour or two of Secrets Manager.
+
+**Per hour left running**, the standing cost is roughly a tenth of a cent: the ECR image sitting in storage and the secret sitting in Secrets Manager, since neither the Runtime nor the Gateway charges for being idle. That is small, and it is also exactly why an untorn-down lab is easy to forget about. Over a month it is about 60 cents a participant, which stops being a rounding error once a room of fifty people leaves theirs behind.
+
 **Cleanup is tag-scoped and refuses to delete untagged resources.** Two tags are in play, one per creation path:
 
 | Tag | Applied by | Deleted by |
@@ -52,7 +71,7 @@ The Neo4j retrieval logic does not change. `deployment-tools/booking_agent.py` i
 | `5.2_teardown.ipynb` | **In place** | Dry run, review, delete, then verify by listing rather than by trusting the success message |
 | `5.3_agentcore_walkthrough.ipynb` | Optional. **In place** | Invokes the deployed Runtime and correlates AgentCore and CloudWatch logs by `request_id` |
 
-`5.3` is optional and depends on `5.1`. It reads `AGENT_RUNTIME_ARN`, the value `5.1` produces at launch. Provisioning does not write that key, so it has to be set from the launch output before `5.3` will do anything live.
+`5.3` is optional and depends on `5.1`. It reads `AGENT_RUNTIME_ARN`, the value `5.1` produces at launch. Provisioning does not write that key, because provisioning does not know the ARN: only a launch produces one. `5.1` writes it into the repository-root `.env` itself, with the same in-place upsert `setup/provision_agentcore.py` uses for its three keys, so `5.3` finds it in a fresh kernel with nothing to copy by hand. It also prints the `export` line if you would rather set it in a shell. If neither has happened, every live cell in `5.3` skips.
 
 Run them in order from this directory:
 
@@ -111,7 +130,7 @@ The Gateway exposes exactly one tool, named `demo06-reservation-request___create
 ## Prerequisites
 
 - **Labs 1 through 4 completed.** Lab 5 deploys what Lab 4 produced, against the graph Lab 1 built.
-- **[Python](https://python.org/downloads) 3.11+.** `workshop_cleanup.py` uses `enum.StrEnum`, which is 3.11 and later.
+- **[Python](https://python.org/downloads) 3.12+.** That is the floor `requirements.txt` installs: its first line is `-e ../workshop`, and `workshop/pyproject.toml` declares `requires-python = ">=3.12"`. `workshop_cleanup.py` also uses `enum.StrEnum`, which is 3.11 and later, so the script alone cannot run below 3.11 even if you install it without the package.
 - **[uv](https://docs.astral.sh/uv/)** package manager.
 - **AWS credentials** allowed to create Secrets Manager secrets, IAM roles, Lambda functions, and `bedrock-agentcore-control` resources. The region resolves from `AWS_REGION`, then `AWS_DEFAULT_REGION`, then defaults to `us-east-1`.
 - **Amazon Bedrock model access.** The Runtime role authorizes `us.anthropic.claude-sonnet-5` by default. Override it with the `MODEL_ID` environment variable.
@@ -182,14 +201,21 @@ The dependency arrow points one way. `setup/provision_agentcore.py` reads files 
 `5.1_agentcore_deploy.ipynb` configures and launches the Runtime. The mechanism, carried over from `deploy_agentcore.ipynb` step 8:
 
 ```python
+import os
 from bedrock_agentcore_starter_toolkit import Runtime
+
+# The container build context. The toolkit builds from the current directory:
+# it honors the Dockerfile it finds there and copies only that directory into
+# the image. Run it from 05-agentcore-deploy/ instead and the toolkit generates
+# its own Dockerfile, ignores the hand-written one, and ships the whole folder.
+os.chdir("deployment-tools")
 
 agent_runtime = Runtime()
 agent_runtime.configure(
-    entrypoint="deployment-tools/booking_agent.py",
+    entrypoint="booking_agent.py",
     execution_role=AGENTCORE_RUNTIME_ROLE_ARN,
     auto_create_ecr=True,
-    requirements_file="deployment-tools/agent_requirements.txt",
+    requirements_file="agent_requirements.txt",
     region=REGION,
     agent_name=RUNTIME_NAME,
     deployment_type="container",
@@ -201,7 +227,9 @@ result = agent_runtime.launch(
 )
 ```
 
-`configure` writes a `.bedrock_agentcore.yaml` file into this folder. `launch` builds the ARM64 image in CodeBuild, creates the ECR repository, pushes the image, and creates the Runtime. Budget three to five minutes for the launch. `result.agent_arn` is the value `5.3` needs as `AGENT_RUNTIME_ARN`.
+Both filenames are bare, not folder-prefixed, and that follows from the `chdir`. They are resolved against the build context, so `deployment-tools/booking_agent.py` would be looked for at `deployment-tools/deployment-tools/booking_agent.py` and would not be found.
+
+`configure` writes a `.bedrock_agentcore.yaml` file into `deployment-tools/`, beside the entrypoint, holding the runtime ID from that deploy. `5.1` deletes any existing one as pre-flight, because a stale ID makes the next run try to update a Runtime teardown already deleted. `launch` builds the ARM64 image in CodeBuild, creates the ECR repository, pushes the image, and creates the Runtime. Budget three to five minutes for the launch. `result.agent_arn` is the value `5.3` needs as `AGENT_RUNTIME_ARN`, and `5.1` writes it into the repository-root `.env` rather than only printing it.
 
 `GATEWAY_URL` is required. `booking_agent.py` raises `GATEWAY_URL is required for the deployed Runtime` when it is absent, rather than starting up with no command tool.
 
@@ -262,6 +290,7 @@ The inverse also holds. `discover_roles` selects every role in the account carry
 - **Your Aura instance and the graph Lab 1 built.** Delete the instance from the Aura console.
 - **CloudWatch log groups.** Retained so the run can be reviewed. Delete them by hand.
 - **The toolkit's shared `AmazonBedrockAgentCoreSDKCodeBuild-*` IAM role.** Deleting it is what caused the original incident.
+- **The toolkit's CodeBuild source bucket, `bedrock-agentcore-codebuild-sources-<account-id>-<region>`.** The toolkit creates it untagged and shares it across every AgentCore deployment in that account and region, so it is outside the tag gate and there is no S3 discoverer here at all. It carries a 7-day object expiry rule and a few megabytes of build source, so it is close to free. `CLEANUP.md` has the reasoning and the two commands to remove it by hand.
 - **Anything untagged.** By design.
 
 ---
@@ -289,12 +318,14 @@ Secret values must never appear in a deployment package, a Gateway schema, a pro
 
 ```bash
 cd 05-agentcore-deploy
-uv run --with pytest --with-requirements requirements.txt -m pytest test_workshop_cleanup.py
+uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-**20 tests**, no AWS credentials needed. Every AWS client is an injected fake. The headline test is `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape the original incident damaged and asserts none of those roles is selected. `test_dry_run_issues_no_mutating_calls` pins the dry run to read-only calls, and `test_resource_in_use_is_retried_and_never_reported_deleted` pins the poll-to-absence behavior.
+**29 tests**, no AWS credentials needed. A bare `pytest` collects both files in this lab and both run against the lab venv.
 
-Name the file explicitly. A bare `pytest` from this directory also collects `deployment-tools/test_runtime_integration.py`, which imports `bedrock_agentcore` and `strands` and only runs in the deployment environment, so collection errors out before the 20 tests report.
+**20 in `test_workshop_cleanup.py`.** Every AWS client is an injected fake. The headline test is `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape the original incident damaged and asserts none of those roles is selected. `test_dry_run_issues_no_mutating_calls` pins the dry run to read-only calls, and `test_resource_in_use_is_retried_and_never_reported_deleted` pins the poll-to-absence behavior.
+
+**9 in `deployment-tools/test_runtime_integration.py`.** These pin the Runtime and Gateway boundary offline: that the Gateway fails closed when it discovers anything other than the one reservation command, that the hook refuses a reservation call whose `request_id` is not the caller's, that the deployed read path touches only the read secret, and that the image excludes the Lambda and the legacy notebooks. They run locally because `requirements.txt` declares `bedrock-agentcore` and `mcp` for exactly this reason.
 
 ---
 
@@ -302,7 +333,10 @@ Name the file explicitly. A bare `pytest` from this directory also collects `dep
 
 ```
 05-agentcore-deploy/
-├── 5.2_teardown.ipynb              # In place: tag-scoped teardown, dry run first
+├── README.md                       # This file
+├── 5.1_agentcore_deploy.ipynb      # Build the wheel, launch the Runtime, tag it, four smoke tests
+├── 5.2_teardown.ipynb              # Tag-scoped teardown, dry run first
+├── 5.3_agentcore_walkthrough.ipynb # Optional: one request correlated end to end
 ├── deploy_agentcore.ipynb          # Reference source for authoring 5.1, not a participant path
 ├── workshop_cleanup.py             # The one teardown implementation
 ├── test_workshop_cleanup.py        # 20 tests, fakes injected, no AWS needed
@@ -310,10 +344,11 @@ Name the file explicitly. A bare `pytest` from this directory also collects `dep
 ├── requirements.txt                # Starter toolkit, Strands, and -e ../workshop
 ├── tool_schemas/
 │   └── tools.json                  # Tool definitions
-├── deployment-tools/               # The deployable source
+├── deployment-tools/               # The deployable source, and the container build context
 │   ├── booking_agent.py            # Runtime entry point: in-process retrieval + one Gateway command
 │   ├── Dockerfile, .dockerignore   # Runtime container image
 │   ├── agent_requirements.txt      # Runtime dependencies deployed to AgentCore
+│   ├── vendor/                     # The workshop wheel, rebuilt by 5.1 on every deploy, gitignored
 │   ├── gateway_target.json         # The single Gateway target manifest
 │   ├── lambda_tools/
 │   │   └── create_reservation_request/
@@ -329,7 +364,7 @@ Read `CLEANUP.md` for the reasoning behind the tag gate and for the incident his
 
 The notebook registry in `setup/run_notebooks.py` already lists all three Lab 5 notebooks with their gates: `5.1_agentcore_deploy.ipynb` and `5.3_agentcore_walkthrough.ipynb` carry `deploys_resources=True`, and `5.2_teardown.ipynb` carries `deletes_resources=True`. That is why teardown is its own notebook rather than a closing section: the gate is a `NotebookSpec` field, and a section cannot hold one.
 
-Both gated commands create or delete real, billable AWS resources, and neither can pass until `5.1` and `5.3` land:
+Both gated commands create or delete real, billable AWS resources, and both need a provisioned account to pass:
 
 ```bash
 uv run setup/run_notebooks.py --labs 5 --include-deploy

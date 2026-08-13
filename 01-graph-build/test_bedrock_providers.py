@@ -4,17 +4,17 @@
 
 Three already-landed fixes are pinned here:
 
-* **F2** — :func:`_converse_messages` must preserve each turn's role and content.
+* **F2**: :func:`_converse_messages` must preserve each turn's role and content.
   ``LLMMessage`` is a ``TypedDict``, so history entries arrive as plain dicts;
   the old attribute-access path silently relabelled every assistant turn as
   ``user``. This test round-trips a two-turn history and asserts the assistant
   turn survives as ``assistant``.
-* **F3** — :meth:`BedrockLLM.ainvoke` hands the blocking botocore call to
+* **F3**: :meth:`BedrockLLM.ainvoke` hands the blocking botocore call to
   ``asyncio.to_thread`` so an outer ``asyncio.wait_for`` can actually fire.
   Before the fix the call ran inline on the event loop and the timeout could
   never cancel it. This test stubs a slow ``invoke`` and asserts the timeout
   raises rather than hanging.
-* **F16** — both Bedrock clients are built with ``BEDROCK_CONFIG`` so each call
+* **F16**: both Bedrock clients are built with ``BEDROCK_CONFIG`` so each call
   is bounded (``read_timeout`` x ``total_max_attempts``) well under the
   per-document ``DOC_TIMEOUT_SECONDS`` budget. This test asserts the config
   reaches both clients and that the bounding invariant holds.
@@ -57,7 +57,7 @@ from workshop.bedrock_providers import (  # noqa: E402
 
 
 class TestConverseMessages(unittest.TestCase):
-    """F2 — a message history must round-trip with roles and content intact."""
+    """F2: a message history must round-trip with roles and content intact."""
 
     def test_typed_dict_history_preserves_roles_and_content(self) -> None:
         """A list of ``LLMMessage`` dicts survives conversion unchanged.
@@ -109,7 +109,7 @@ class TestConverseMessages(unittest.TestCase):
 
 
 class TestAinvokeTimeout(unittest.TestCase):
-    """F3 — ``ainvoke`` runs off the event loop so ``wait_for`` can cancel it."""
+    """F3: ``ainvoke`` runs off the event loop so ``wait_for`` can cancel it."""
 
     def test_wait_for_times_out_instead_of_hanging(self) -> None:
         """A slow synchronous ``invoke`` must not defeat an outer timeout.
@@ -153,7 +153,7 @@ class TestAinvokeTimeout(unittest.TestCase):
 
 
 class TestBedrockClientConfig(unittest.TestCase):
-    """F16 — both clients carry a bounded config, and the bound holds."""
+    """F16: both clients carry a bounded config, and the bound holds."""
 
     def test_both_clients_apply_bedrock_config(self) -> None:
         for provider in (BedrockLLM(), BedrockEmbeddings()):

@@ -29,8 +29,8 @@ Lab 4 moves it there. The limit comes out of a `Rule` node in your graph, the re
 |---|---|
 | 1. Connect, and confirm the rule is in the graph | Applies the idempotent graph preparation, reports what is still missing, then reads the `Rule` node and asserts it agrees with the shared constant |
 | 2. Register the write on `hotel_agent` | Rebuilds Lab 3's `hotel_agent` with `create_reservation_request_tool` added and `MaxGuestsHook` removed |
-| 3. A 15-guest request is rejected | Computes the dates and the `request_id`, asks the agent to book 15 guests, then calls the command directly to read the fields the agent was working from |
-| 4. A valid request is recorded, and safe to retry | Accepts a within-limit request on the same `request_id`, then re-delivers it identically |
+| 3. A 15-guest request is rejected | Computes the dates and the two request ids, asks the agent to book 15 guests, then calls the command directly twice to read the fields the agent was working from and to show the rejection stored nothing |
+| 4. A valid request is recorded, and safe to retry | Accepts a within-limit request on the booking `request_id`, then re-delivers it identically |
 | 5. A hotel that does not exist is rejected | Sends `hotel_id hotel-does-not-exist` through the agent, then through the command directly |
 | 6. Inspect the reservation in your graph | Matches on `request_id` and asserts exactly one row |
 
@@ -56,7 +56,7 @@ The assertion runs in that direction on purpose. When the constant and the graph
 
 ### The hook comes off the agent
 
-Section 2 rebuilds `hotel_agent` with two changes from Lab 3. `create_reservation_request_tool` joins the toolset, and `MaxGuestsHook` is gone.
+Section 2 rebuilds `hotel_agent` with three changes from Lab 3. `create_reservation_request_tool` joins the toolset, `MaxGuestsHook` is gone, and the system prompt gains one instruction about passing the caller's identifiers through.
 
 Removing the hook is the point rather than a simplification. The rule it enforced now lives in the graph, and `workshop.reservation_command` reads it inside the write transaction, so the limit holds for every caller of the command: this notebook calling it directly, the agent calling it as a tool, and the Lambda Lab 5 puts behind AgentCore Gateway. A hook protects one agent. A rule in the graph, checked at the write boundary, protects the data.
 
@@ -90,18 +90,21 @@ Every response is a structured document rather than prose, so the agent reports 
 
 ### The four cases the notebook runs
 
-1. **`max_guests_exceeded`.** The agent is asked to book `OVER_LIMIT_GUESTS`, which is `15`, into the hero hotel. Nothing in the prompt mentions a limit of 10, so the model could not have been argued out of one. The command reads the rule, rejects, and writes nothing. Section 3 then calls the command directly and asserts `status == "rejected"` and `reason_code == "max_guests_exceeded"`.
-2. **Accepted.** The same `request_id` with `guests=MAX_GUESTS` creates one `ReservationRequest` linked to the hero hotel by `FOR_HOTEL`. The cell asserts `status == "accepted"` and `duplicate` is false.
-3. **Duplicate delivery.** The identical payload delivered a second time returns the stored record with `duplicate=true` and its original `created_at`, and creates no second node. The cell asserts `replay["duplicate"] is True`.
+1. **`max_guests_exceeded`.** The agent is asked to book `OVER_LIMIT_GUESTS`, which is `15`, into the hero hotel. Nothing in the prompt mentions a limit of 10, so the model could not have been argued out of one. The command reads the rule, rejects, and writes nothing. Section 3 then calls the command directly and asserts `status == "rejected"` and `reason_code == "max_guests_exceeded"`. It delivers the same payload once more and asserts `duplicate` is still false, which is what proves the rejection stored nothing: a duplicate can only be reported against a stored request.
+2. **Accepted.** The booking `request_id` with `guests=MAX_GUESTS` creates one `ReservationRequest` linked to the hero hotel by `FOR_HOTEL`. The cell asserts `status == "accepted"` and `duplicate` is false.
+3. **Duplicate delivery.** The identical payload delivered a second time returns the stored record with `duplicate=true` and its original `created_at`, and creates no second node. The cell asserts `replay["duplicate"] is True`, and it also serializes `status`, `request_id`, `hotel_id`, and `created_at` from both responses and asserts the two strings are equal, so the claim that one record came back twice is shown rather than stated.
 4. **`unknown_hotel`.** `hotel_id hotel-does-not-exist` matches no prepared fixture `Hotel`, so the command rejects rather than creating an orphan request. This is why grounded retrieval returns an opaque `hotel_id` and not a display name: a name a model half-remembers fails this check, and a name it invents outright fails it too.
 
 ### The notebook creates the `request_id`, not the model
 
-Section 3 generates it and prints it:
+Section 3 generates two of them and prints both:
 
 ```python
-REQUEST_ID = str(uuid.uuid4())
+OVER_LIMIT_REQUEST_ID = str(uuid.uuid4())
+BOOKING_REQUEST_ID = str(uuid.uuid4())
 ```
+
+One id per case, because the two cases make different points. The over-limit id shows that a rejected request leaves nothing behind. The booking id shows that the same id delivered twice produces one node.
 
 Idempotence cannot be demonstrated any other way. A model that invents a fresh UUID on the retry produces two distinct requests and two nodes, and the second delivery is a new write rather than a replay. The caller owns the key, reuses it on every retry, and the agent is told to pass it through verbatim. `_validate_command` rejects anything that is not a canonical UUID before a session is opened.
 
@@ -131,7 +134,7 @@ The graph shape is small on purpose:
       -[:FOR_HOTEL]-> (:Hotel {hotel_id})
 ```
 
-Three uniqueness constraints make it safe, created idempotently by `apply_demo6_graph`:
+Three uniqueness constraints make it safe, created idempotently by `apply_lab4_fixtures`:
 
 | Constraint | Guarantees |
 |---|---|
@@ -208,13 +211,13 @@ Every test but one runs without a live graph. `SeededRuleTests::test_seeded_rule
 
 That live test is also the one that reports a graph problem rather than a code problem. Run against a graph whose build had not yet reached the rule-seeding step, it fails with `AssertionError: 0 != 1 : Expected exactly one demo-06-maximum-guests rule node`, and the other 55 tests pass. Read a failure there as "re-run Lab 1", or as "the build is still running", before reading it as a regression.
 
-`conftest.py` keeps pytest out of any staged deployment directory, so a bare `pytest` from this folder collects only the five files above.
+Collection needs no configuration in this folder. It holds exactly the five test files above, neither notebook is named `test_*`, and pytest skips `.venv` by default, so a bare `pytest` from here collects those five files and nothing else. `conftest.py` records that boundary and sets no options; the staged deployment directories its earlier `collect_ignore_glob` named live in Lab 5, not here.
 
 ---
 
 ## Troubleshooting
 
-**No `Rule` node found, or `enabled maximum-guests rule is unavailable`.** The command fails closed rather than accepting an unchecked request, so this is the correct behavior for an unseeded graph. `1.1_build_graph.ipynb` seeds `demo-06-maximum-guests` in its closing step, and section 1 of this notebook applies the same idempotent preparation again through `apply_demo6_graph`. Re-run Lab 1 and let it finish. Confirm the node is there without writing anything:
+**No `Rule` node found, or `enabled maximum-guests rule is unavailable`.** The command fails closed rather than accepting an unchecked request, so this is the correct behavior for an unseeded graph. `1.1_build_graph.ipynb` seeds `demo-06-maximum-guests` in its closing step, and section 1 of this notebook applies the same idempotent preparation again through `apply_lab4_fixtures`. Re-run Lab 1 and let it finish. Confirm the node is there without writing anything:
 
 ```bash
 cd 04-grounded-write
@@ -234,7 +237,7 @@ with GraphDatabase.driver(c.uri, auth=(c.username, c.password)) as d:
 
 A `rule_count` of `0` means the rule is missing. A `rule_count` of `1` with `enabled: False` means the command will not enforce the limit and will not write either. A `max_guests` that disagrees with `contracts.MAX_GUESTS` means the graph was seeded by older code; re-seed the graph rather than changing the constant, since the graph is what the command reads.
 
-**A duplicate looks like a failure.** It is not. `duplicate=true` with `status=accepted` is the designed outcome of re-delivering the same `request_id` with the same payload, and it means no second node was written. The `created_at` in that response is the original timestamp, not a new one, which is the evidence that nothing was updated. Section 6 asserts exactly one row after three deliveries of that `request_id` plus one rejection. A retry that returns `duplicate=false` is the outcome to be suspicious of: it means the `request_id` changed between attempts, most likely because a model invented a new one instead of passing the caller's through. If instead you get `service_error` on a retry, the `request_id` was reused with different `hotel_id`, dates, or `guests`; the stored request is immutable and was left untouched.
+**A duplicate looks like a failure.** It is not. `duplicate=true` with `status=accepted` is the designed outcome of re-delivering the same `request_id` with the same payload, and it means no second node was written. The `created_at` in that response is the original timestamp, not a new one, which is the evidence that nothing was updated. Section 6 asserts exactly one row after two deliveries of the booking `request_id`, and the over-limit `request_id` from section 3, delivered twice on its own, leaves no row at all. A retry that returns `duplicate=false` is the outcome to be suspicious of: it means the `request_id` changed between attempts, most likely because a model invented a new one instead of passing the caller's through. If instead you get `service_error` on a retry, the `request_id` was reused with different `hotel_id`, dates, or `guests`; the stored request is immutable and was left untouched.
 
 **An unknown-hotel rejection on a hotel you can see in the graph.** `reason_code=unknown_hotel` means the `hotel_id` matched no `Hotel` node carrying `demo6_fixture = true`. Only hotels in the committed fixture manifest have a stable `hotel_id`, and grounded retrieval returns `hotel_id: null` for every other hotel, precisely so those hotels cannot be sent to the write path. Take the ID from `manifest.hotels[HERO_SOURCE]` as section 3 does, or from a retrieval result's `hotel_id` field, and never from a hotel name. If the fixture hotels themselves are unresolved, section 1 names that as a readiness problem and the fix is to re-run Lab 1.
 
@@ -249,9 +252,10 @@ A `rule_count` of `0` means the rule is missing. A `rule_count` of `1` with `ena
 ```
 04-grounded-write/
 ├── 4.1_reservation_write.ipynb   # The one notebook, 21 cells
+├── 01_hybrid_retrieval.ipynb     # Retired authoring source, not in the runner registry
 ├── CONTRACTS.md                  # The frozen retrieval and command contracts
 ├── requirements.txt              # -e ../workshop, strands-agents, starter toolkit
-├── conftest.py                   # Keeps pytest out of staged deployment directories
+├── conftest.py                   # Records the pytest collection boundary, sets no options
 ├── test_reservation_command.py   # 22 tests
 ├── test_graph_setup.py           # 12 tests
 ├── test_hybrid_retrieval.py      # 12 tests

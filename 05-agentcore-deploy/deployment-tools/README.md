@@ -45,15 +45,24 @@ locally, imported rather than copied.
 
 ## Running the tests
 
-`test_runtime_integration.py` imports `booking_agent`, which imports
-`bedrock_agentcore`, `strands`, and `mcp`. Those are Runtime dependencies from
-`agent_requirements.txt` and are absent from the lab environment installed by
-[`../requirements.txt`](../requirements.txt), so this file does not collect
-there. It is meant for a deployment environment with the AgentCore dependencies
-present.
+`test_runtime_integration.py` runs against the lab venv and needs no AWS
+credentials. It imports `booking_agent`, which imports `bedrock_agentcore`,
+`strands`, and `mcp`, and [`../requirements.txt`](../requirements.txt) declares
+all three so a facilitator reading this directory has them resolved. Nine tests,
+all offline: every AWS and Neo4j call is mocked.
 
-The lab's own test suite is [`../test_workshop_cleanup.py`](../test_workshop_cleanup.py),
-which runs against the lab venv and needs no AWS credentials.
+```bash
+cd ..
+uv run --with pytest --with-requirements requirements.txt -m pytest
+```
+
+That collects these nine plus the twenty in
+[`../test_workshop_cleanup.py`](../test_workshop_cleanup.py), 29 in total.
+
+These tests pin the deployed boundary rather than the deployment: the Gateway
+fails closed if it discovers anything but the one reservation command, the hook
+refuses a call whose `request_id` is not the caller's, the read path touches only
+the read secret, and the image excludes the Lambda and the legacy notebooks.
 
 ## Production-hardening reference
 

@@ -71,8 +71,9 @@ deployment_package.zip
 
 # AgentCore CLI config and generated files (contain AWS account IDs, ARNs, local paths)
 .bedrock_agentcore.yaml
-07-agentcore-memory-demo/Dockerfile
-07-agentcore-memory-demo/.dockerignore
+
+# The workshop wheel Lab 5 builds into the container context at deploy time
+05-agentcore-deploy/deployment-tools/vendor/
 
 # Node (CDK)
 node_modules/
@@ -89,8 +90,9 @@ faqs_docs.json
 faqs_vector.index
 faqs_docs_lite.json
 faqs_vector_lite.index
-# hotel-faqs.zip is tracked — needed for auto-extraction in the workshop notebooks
-!01-graphrag-demo/hotel-faqs.zip
+# hotel-faqs.zip is tracked. Lab 1 auto-extracts it, so the blanket *.zip rule
+# above must not swallow it.
+!01-graph-build/hotel-faqs.zip
 logs/
 verify-worklog.md
 *-executed.ipynb

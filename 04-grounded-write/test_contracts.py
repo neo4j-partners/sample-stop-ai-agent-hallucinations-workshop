@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Contract tests for the bounded Demo 06 service boundary."""
+"""Contract tests for the bounded Lab 4 service boundary."""
 
 import json
 import unittest

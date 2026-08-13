@@ -32,10 +32,10 @@ Nine code cells, run top to bottom, in eight numbered steps:
 | 1 | Reads `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and the AWS credential chain, and sets `BUILD_READY`, `MODE`, and `REBUILD` | Every module that opens a driver imports `workshop.graph_connection`, which raises at import when `NEO4J_PASSWORD` is unset. So the check reads the environment directly and the connecting cells import their modules later, inside the guard |
 | 2 | Renders `GRAPH_SCHEMA` and prints the three `additional_*` flags | The flags are what turn the schema from a suggestion into a rule |
 | 3 | `selected_paths(MODE)`, then asserts `missing_source_fixtures(paths)` is empty | Five source documents are load-bearing for later labs. Losing one produces a graph whose questions quietly return nothing |
-| 4 | `ensure_retrieval_indexes`, then `report_readiness`, setting `NEEDS_BUILD` | The check that makes the notebook re-runnable. An empty problem list means Lab 2 can already run and there is nothing to rebuild |
-| 5 | `await run_build(paths, title)` and asserts the exit code is `0` | The extraction itself: clear, canary, verify, clear, ingest, count, report |
+| 4 | `ensure_retrieval_indexes`, then `report_readiness`, setting `NEEDS_BUILD` and `INDEX_ERROR` | The check that makes the notebook re-runnable. An empty problem list means Lab 2 can already run and there is nothing to rebuild. An index that exists at the wrong dimension sets `INDEX_ERROR` and stops the build before it starts |
+| 5 | `await run_build(paths, title)` and asserts the exit code is `0`, or prints `report(driver)` when the graph is already ready | The extraction itself: clear, canary, verify, clear, ingest, count, report. The acceptance queries print either way |
 | 6 | `verify_retrieval_indexes`, then asserts `fixture_problems(driver)` is empty | A vector index at the wrong dimension does not raise, it returns the wrong neighbours. The check is against the contract, not against existence |
-| 7 | `apply_demo6_graph`, then asserts `readiness_problems` is empty | Seeds the graph-owned data Labs 4 and 5 depend on |
+| 7 | `apply_lab4_fixtures`, asserts `readiness_problems` is empty, then reads the constraints, the stamped IDs, and the rule back out of the graph | Seeds the graph-owned data Labs 4 and 5 depend on, and prints what the graph actually holds rather than what the cell intended to write |
 | 8 | Summarises what was built, then closes the driver | The counts in the readiness report above it are the evidence, not the table |
 
 The build is also a command-line script. The notebook is a wrapper around the same `prepare_graph.py` and `graph_builder.py` code, so either path produces the same graph.
@@ -160,13 +160,13 @@ The names and the embedding settings come from `workshop.retrieval_contract`, wh
 
 Extraction gives each hotel a name and an address, which is enough to retrieve against. It does not give them a stable identifier, and the reservation write in Lab 4 needs one. An agent that books against a hotel found by name books against whatever the model spelled that day.
 
-Step 7 calls `apply_demo6_graph` from [`workshop/src/workshop/graph_setup.py`](../workshop/src/workshop/graph_setup.py). This is graph-owned data rather than extracted data, and it is `MERGE` and `SET` throughout, so running it twice changes nothing:
+Step 7 calls `apply_lab4_fixtures` from [`workshop/src/workshop/graph_setup.py`](../workshop/src/workshop/graph_setup.py). This is graph-owned data rather than extracted data, and it is `MERGE` and `SET` throughout, so running it twice changes nothing:
 
 - **Three uniqueness constraints:** `demo06_fixture_hotel_id` on `Hotel.hotel_id`, `demo06_reservation_request_id` on `ReservationRequest.request_id`, and `demo06_rule_id` on `Rule.rule_id`.
 - **The fixture hotel IDs.** `load_manifest` reads the committed filename-to-UUID mapping at `workshop/src/workshop/fixtures/hotel_ids.json`, validates that each ID is an opaque UUID and that the manifest holds exactly the two Cairo fixtures, then resolves each source filename through `Document -> Chunk -> Hotel` and stamps the ID onto the matching hotel. One of the two is the hero hotel, `AnyCompany Cairo Nile View`.
 - **The `max_guests` rule.** A single `:Rule` node with `rule_type` `MAXIMUM_GUESTS`, `max_guests` from `contracts.MAX_GUESTS`, `enabled` true, and both a rejection message and a steering message. Lab 4 reads this node inside the write transaction and rejects a request the prompt alone would have allowed.
 
-`apply_demo6_graph` returns blocking problems rather than raising, and `readiness_problems` re-checks everything without writing: the two indexes, the three constraints, the fixture resolution with IDs required, the hero hotel's name, address, rating of 4.5 and expected amenity terms, and the rule's field values. Both are asserted empty in the notebook. Skip this step and Lab 4 opens onto an unprepared graph.
+`apply_lab4_fixtures` returns blocking problems rather than raising, and `readiness_problems` re-checks everything without writing: the two indexes, the three constraints, the fixture resolution with IDs required, the hero hotel's name, address, rating of 4.5 and expected amenity terms, and the rule's field values. Both are asserted empty in the notebook. Skip this step and Lab 4 opens onto an unprepared graph.
 
 ## Nothing ships pre-embedded
 
@@ -188,7 +188,7 @@ At an AWS event the Code Editor instance pre-extracts the zip so participants sk
 - [Python](https://python.org/downloads) 3.12+. The shared package this lab installs declares `requires-python = ">=3.12"` in [`workshop/pyproject.toml`](../workshop/pyproject.toml), so `-e ../workshop` refuses to install on anything older.
 - [uv](https://docs.astral.sh/uv/) package manager.
 - The repo-root `.env` filled in with `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `AWS_REGION`, per [`00-setup/README.md`](../00-setup/README.md).
-- **APOC enabled** on the Aura instance. `neo4j-graphrag` uses it during the build.
+- **APOC**, which `neo4j-graphrag` calls during the build. Aura ships APOC Core, so there is nothing to enable.
 - **Bedrock model access for both models** in `AWS_REGION`: `us.anthropic.claude-sonnet-5` for extraction and `amazon.nova-2-multimodal-embeddings-v1:0` for embeddings. Enabling one and not the other fails part way through the build.
 
 This lab creates no AWS resources. It makes Bedrock inference calls and nothing else.
@@ -210,6 +210,8 @@ unzip -q -o hotel-faqs.zip -d data/
 ```
 
 That writes 300 `hotel-<city>-<nnn>.txt` files into `data/`, which is where both the notebook and the scripts look. Skip this at an AWS event; the files are already there.
+
+Both first-class paths already do this for you: the notebook's first cell and `prepare_graph.py` each extract the zip when `data/` holds no documents, and skip when it does. Run the command above by hand only before `build_graph.py` or `build_graph_lite.py`, which build unconditionally and extract nothing.
 
 ### Run
 
@@ -252,7 +254,7 @@ The notebook is also registered with the shared runner, and `uv run setup/run_no
 
 **The canary failed.** The output names the problem before it clears the graph. `off-schema labels present: ['Address']` means the schema was not honoured; confirm the notebook printed `False` for all three `additional_*` flags and that nothing local overrides `GRAPH_SCHEMA`. `none of the N canary hotels had name, address, guest_rating and a contracted relationship` is usually a truncated extraction: check `EXTRACTION_MAX_TOKENS` is still 16000 and that the extraction model has not been swapped for a smaller one. Either way the graph is left empty, so a re-run starts clean.
 
-**`Canary produced no :Chunk — extraction did not run.`** No chunk was written at all, so the failure is upstream of the schema. Check the per-document lines above it: `⏰ timeout` on all three points at Bedrock throttling or a region mismatch, and `❌ <message>` carries the underlying error. Confirm `AWS_REGION` matches the region where both models are enabled, and that the Aura instance is running rather than paused.
+**`Canary produced no :Chunk. Extraction did not run.`** No chunk was written at all, so the failure is upstream of the schema. Check the per-document lines above it: `⏰ timeout` on all three points at Bedrock throttling or a region mismatch, and `❌ <message>` carries the underlying error. Confirm `AWS_REGION` matches the region where both models are enabled, and that the Aura instance is running rather than paused.
 
 **Document or chunk counts do not match.** The assertion is correct and the graph is wrong. Two builds overlapped, or a previous build was interrupted and left nodes behind. Run one build, alone, and let it finish. `uv run prepare_graph.py --mode lite --rebuild` clears and rebuilds from scratch. Confirm no second notebook kernel or terminal is still running a build against the same instance before starting.
 
@@ -267,7 +269,7 @@ caffeinate -i uv run prepare_graph.py --mode lite --rebuild
 
 **Bedrock access denied.** Two models have to be enabled, and the error names only the one that was called. Enable both `us.anthropic.claude-sonnet-5` and `amazon.nova-2-multimodal-embeddings-v1:0` in the [Bedrock Model Access console](https://console.aws.amazon.com/bedrock/home#/modelaccess), in the region `AWS_REGION` names. An extraction failure on every document points at the Claude model; extraction succeeding while chunks end up with no embedding points at Nova.
 
-**APOC is missing.** `neo4j-graphrag` calls APOC procedures during the build, and a missing procedure surfaces as `Unknown procedure` or `There is no procedure with the name apoc...` on every document. Enable the APOC plugin from the Aura instance settings and wait for the instance to restart, then re-run.
+**APOC is missing.** `neo4j-graphrag` calls APOC procedures during the build, and a missing procedure surfaces as `Unknown procedure` or `There is no procedure with the name apoc...` on every document. This does not happen on Aura, which ships APOC Core, so the URI is pointing at something else. On a self-hosted Neo4j, install the APOC plugin, wait for the restart, then re-run.
 
 **`Retrieval index check failed:`** followed by one line per problem. `missing index 'hotel_chunk_embeddings'` after a build that reported success means index creation was interrupted; re-run the notebook, which is idempotent and recreates them. `has 384 dimensions, expected 1024` means the graph was built with a different embedding model. Do not edit the constants to match the index: the vectors themselves are wrong for the retrieval contract, so rebuild with `workshop.retrieval_contract` unmodified.
 
@@ -275,7 +277,7 @@ caffeinate -i uv run prepare_graph.py --mode lite --rebuild
 
 **Cells print "Skipping" and nothing runs.** `NEO4J_URI`, `NEO4J_USERNAME`, or `NEO4J_PASSWORD` is unset, or no AWS credentials were found. Step 1 names which. The hosted Workshop Studio environment writes `NEO4J_USER` while every lab reads `NEO4J_USERNAME`; check that first if authentication fails only there.
 
-**`No source documents found in .../data`.** The corpus is not extracted. Run `unzip -q -o hotel-faqs.zip -d data/` from this directory. Run the notebook and the scripts from `01-graph-build/`, since `DATA_DIR` is the relative path `data`.
+**`No source documents found in .../data`,** or the notebook's `no source documents in .../data`. The corpus is not extracted. Re-run the notebook's first cell, which extracts it, or run `unzip -q -o hotel-faqs.zip -d data/` from this directory. Run the notebook and the scripts from `01-graph-build/`, since `DATA_DIR` is the relative path `data`.
 
 ---
 

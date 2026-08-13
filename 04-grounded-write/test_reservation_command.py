@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Focused offline tests for the Demo 06 reservation command."""
+"""Focused offline tests for the Lab 4 reservation command."""
 
 import importlib.util
 import json

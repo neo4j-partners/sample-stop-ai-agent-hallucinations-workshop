@@ -14,7 +14,10 @@ license = { text = "MIT-0" }
 # package. See setup/provision_agentcore.py:build_lambda_zip.
 dependencies = [
     "boto3>=1.35.0",
-    "neo4j>=5.28.0,<7.0.0",
+    # 6.x, not 5.x. The deployed Runtime and the reservation Lambda both pin
+    # >=6.0.0, so a local floor of 5.28 would let a lab exercise the shared
+    # write path against a driver major version it never meets in production.
+    "neo4j>=6.0.0,<7.0.0",
     "neo4j-graphrag>=1.18.0",
     "python-dotenv>=1.0.1",
 ]

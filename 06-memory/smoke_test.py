@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Phase 1 smoke test for the inspectable Neo4j memory foundations.
+"""Smoke test for the inspectable Neo4j memory foundations.
 
 Connects with the shared environment configuration and proves the memory
-layer is usable before the scenario notebook is built:
+layer is usable before the scenario notebook is run:
 
 1. An unscoped write (no ``user_identifier``) is rejected by multi-tenant
    enforcement.
@@ -91,6 +91,7 @@ def delete_smoke_user(config: MemoryDemoConfig, user_identifier: str) -> None:
     try:
         with driver.session(database=config.database) as session:
             session.run(
+                "CYPHER 25 "
                 "MATCH (u:User {identifier: $identifier}) DETACH DELETE u",
                 identifier=user_identifier,
             ).consume()
@@ -99,7 +100,7 @@ def delete_smoke_user(config: MemoryDemoConfig, user_identifier: str) -> None:
 
 
 async def run_checks(config: MemoryDemoConfig) -> int:
-    """Run the Phase 1 validation checks against live Neo4j and Bedrock."""
+    """Run the four validation checks against live Neo4j and Bedrock."""
     session_id = f"memory-smoke-{uuid.uuid4().hex[:8]}"
     user_identifier = f"smoke-user-{uuid.uuid4().hex[:8]}"
     print(f"Throwaway session: {session_id}")
@@ -153,6 +154,7 @@ async def run_checks(config: MemoryDemoConfig) -> int:
         # 4. The stored embedding is non-empty and full width.
         rows = await memory.query.cypher(
             """
+            CYPHER 25
             MATCH (c:Conversation {session_id: $session_id})
                   -[:HAS_MESSAGE]->(m:Message)
             RETURN size(m.embedding) AS width

@@ -7,13 +7,14 @@ Replaces OpenAI dependencies with:
 - Amazon Nova 2 Multimodal Embeddings for embeddings
 - Amazon Bedrock Claude for LLM entity extraction
 
-No OpenAI API key required — uses AWS credentials only.
+No OpenAI API key required, AWS credentials only.
 """
 
 import asyncio
 import json
 import os
 from collections.abc import Sequence
+from typing import Any
 
 import boto3
 from botocore.config import Config
@@ -38,6 +39,17 @@ from workshop.retrieval_contract import (
 # Worst case is 3 x 45s plus backoff, roughly 140s, under the 180s bound.
 # Keep that inequality true if you change either number.
 BEDROCK_CONFIG = Config(read_timeout=45, retries={"max_attempts": 2})
+
+# The one chat model the workshop runs on. Every lab that builds an agent or an
+# extraction LLM reads it from here rather than restating the literal, so a
+# participant who has enabled a different model in their region changes one
+# line. `MODEL_ID` overrides it for a lab that needs to.
+DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5"
+
+
+def default_model_id() -> str:
+    """Return the workshop chat model, letting `MODEL_ID` override it."""
+    return os.environ.get("MODEL_ID") or DEFAULT_MODEL_ID
 
 
 def _strip_code_fence(text: str) -> str:
@@ -83,13 +95,22 @@ def _converse_messages(message_history) -> list[dict]:
 
 
 class BedrockEmbeddings(Embedder):
-    """Amazon Bedrock embeddings using Nova 2 Multimodal Embeddings."""
+    """Amazon Bedrock embeddings using Nova 2 Multimodal Embeddings.
+
+    This is the only embedder in the workshop. Lab 1 writes chunk vectors with
+    it and Labs 2 onward embed their queries with it, which is what keeps the
+    write and read paths on one model, one purpose, and one width. A second
+    embedder class defined anywhere else would agree with this one only by
+    coincidence, and a disagreement returns wrong results with no error.
+    """
 
     def __init__(
         self,
         model_id: str = EMBEDDING_MODEL_ID,
         region_name: str | None = None,
         dimensions: int = EMBEDDING_DIMENSIONS,
+        *,
+        bedrock_client: Any | None = None,
     ):
         # Resolve the region inside the body: an os.environ default argument is
         # evaluated once at import, before the caller can set AWS_REGION.
@@ -97,7 +118,9 @@ class BedrockEmbeddings(Embedder):
             region_name = os.environ.get("AWS_REGION", "us-east-1")
         self.model_id = model_id
         self.dimensions = dimensions
-        self.client = boto3.client(
+        # `bedrock_client` exists so a test can assert the request payload
+        # without a network call. Production callers leave it unset.
+        self.client = bedrock_client or boto3.client(
             "bedrock-runtime", region_name=region_name, config=BEDROCK_CONFIG
         )
 
@@ -124,7 +147,7 @@ class BedrockLLM(LLMInterface):
 
     def __init__(
         self,
-        model_id: str = "us.anthropic.claude-sonnet-5",
+        model_id: str = DEFAULT_MODEL_ID,
         region_name: str | None = None,
         temperature: float | None = None,
         max_tokens: int = 4096,

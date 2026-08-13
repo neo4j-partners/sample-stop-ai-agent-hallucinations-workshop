@@ -1,21 +1,20 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = [
 #     # Notebook execution
 #     "nbconvert>=7.16",
 #     "nbformat>=5.10",
 #     "ipykernel>=6.29",
-#     # Shared demo dependencies
+#     # What the labs need beyond the shared package. boto3, neo4j,
+#     # neo4j-graphrag, and python-dotenv are deliberately absent: `workshop`
+#     # declares all four, and restating them here is how the runner's pins
+#     # drift out of step with the package's.
 #     "strands-agents>=1.27.0",
-#     "boto3>=1.35.0",
 #     "numpy>=1.24.0",
-#     "neo4j>=5.28.0",
-#     "neo4j-graphrag>=1.18.0",
-#     "python-dotenv>=1.0.1",
 #     "pyyaml>=6.0",
 #     "bedrock-agentcore-starter-toolkit",
-#     # Demo 08 (Neo4j graph memory; the notebook self-skips when unconfigured)
+#     # Lab 6 (Neo4j graph memory; the notebook self-skips when unconfigured)
 #     "neo4j-agent-memory[bedrock]==0.5.0",
 #     # The modules more than one lab shares. Every notebook imports from it, so
 #     # the runner's environment needs it the same way a lab's .venv does.

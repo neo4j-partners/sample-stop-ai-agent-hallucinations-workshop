@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Narrow, idempotent reservation-request command for Demo 06.
+"""Narrow, idempotent reservation-request command for Lab 4.
 
 The command reads one enabled Neo4j rule, matches one prepared fixture hotel,
 and writes one workshop-owned ``ReservationRequest``. It does not book a room,
@@ -100,7 +100,7 @@ class Neo4jCommandConfig:
     @classmethod
     def from_environment(cls) -> "Neo4jCommandConfig":
         """Load local connection values without making a network call."""
-        values = {name: os.environ.get(name) for name in contracts.LOCAL_NEO4J_ENV}
+        values = {name: os.environ.get(name) for name in contracts.REQUIRED_NEO4J_ENV}
         missing = [name for name, value in values.items() if not value]
         if missing:
             names = ", ".join(missing)
@@ -109,7 +109,8 @@ class Neo4jCommandConfig:
             uri=values["NEO4J_URI"] or "",
             username=values["NEO4J_USERNAME"] or "",
             password=values["NEO4J_PASSWORD"] or "",
-            database=values["NEO4J_DATABASE"] or "",
+            database=os.environ.get("NEO4J_DATABASE")
+            or contracts.DEFAULT_NEO4J_DATABASE,
         )
 
     @classmethod
@@ -429,7 +430,7 @@ def _execute_command(
         return _rejected(
             command,
             contracts.ReservationReason.UNKNOWN_HOTEL,
-            "Hotel is not a prepared Demo 06 fixture.",
+            "Hotel is not a prepared workshop fixture.",
         )
     if targets.get("hotel_count") != 1 or targets.get("hotel_id") != command.hotel_id:
         raise CommandStateError("fixture hotel identity is ambiguous")

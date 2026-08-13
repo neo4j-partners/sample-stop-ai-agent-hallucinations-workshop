@@ -2,11 +2,19 @@
 # SPDX-License-Identifier: MIT-0
 """Scoped cleanup for the inspectable Neo4j memory demo.
 
-Removes exactly what the scenario notebook wrote:
+Removes every Lab 6 record on the instance, not just the current run:
 
 1. Workshop-owned ``ABOUT_HOTEL`` relationships.
 2. Conversations, messages, and users in the ``demo08-`` namespace.
-3. Preferences tagged by this demo, but only after no user owns them.
+3. Preferences in the ``hotels-demo08-`` category namespace or tagged by this
+   demo, but only after no user owns them.
+
+The session and user sweeps match the bare ``demo08-`` prefix with no run id,
+which is deliberate: it is what makes an interrupted earlier run recoverable.
+The consequence is that on a Neo4j instance shared by several participants,
+one participant running this script deletes every participant's Lab 6
+records, including runs still in progress. Run it against a shared instance
+only when everyone is finished.
 
 The hotel graph, its chunk indexes, and other modules' data are untouched.
 The library-managed memory vector indexes stay in place: they are shared
@@ -30,6 +38,7 @@ from neo4j.exceptions import DriverError, Neo4jError
 from memory_helpers import (
     DEMO_ID_PREFIX,
     HOTEL_RELATIONSHIP,
+    PREFERENCE_CATEGORY_PREFIX,
     MemoryDemoConfig,
     WORKSHOP_OWNER,
     load_config,
@@ -62,14 +71,25 @@ WHERE u.identifier STARTS WITH $prefix
 DETACH DELETE u
 """
 
+# Two handles, because either one alone leaks. The owner marker is stamped
+# only by the notebook's second-to-last cell, so a run that died earlier never
+# gets it. The category prefix is written with the Preference itself in
+# section 3, and by the time this query runs the preceding sweeps have already
+# detached every edge that could otherwise have found the node.
 DELETE_ORPHANED_DEMO_PREFERENCES = """
 CYPHER 25
 MATCH (p:Preference)
-WHERE p.workshop_owner = $owner
+WHERE (p.workshop_owner = $owner
+       OR p.category STARTS WITH $category_prefix)
   AND NOT EXISTS { MATCH (:User)-[:HAS_PREFERENCE]->(p) }
 DETACH DELETE p
 """
 
+# Defensive, and a no-op for anything this lab wrote: the only users that own
+# a marked preference are the demo08- users, and they were detach-deleted two
+# queries ago. It stays as a backstop for a preference some other application
+# attached one of its own users to, where deleting the node would be wrong and
+# leaving this lab's marker on it would also be wrong.
 REMOVE_SHARED_PREFERENCE_MARKERS = """
 CYPHER 25
 MATCH (p:Preference)
@@ -90,19 +110,27 @@ def run_cleanup(config: MemoryDemoConfig) -> int:
         with driver.session(database=config.database) as session:
             hotels_before = session.run(COUNT_HOTELS).single()["hotels"]
 
-            deleted = 0
+            nodes_deleted = 0
+            relationships_deleted = 0
             for query, params in (
                 (DELETE_DEMO_HOTEL_LINKS, {"owner": WORKSHOP_OWNER}),
                 (DELETE_PREFIXED_SESSIONS, {"prefix": DEMO_ID_PREFIX}),
                 (DELETE_PREFIXED_USERS, {"prefix": DEMO_ID_PREFIX}),
                 (
                     DELETE_ORPHANED_DEMO_PREFERENCES,
-                    {"owner": WORKSHOP_OWNER},
+                    {
+                        "owner": WORKSHOP_OWNER,
+                        "category_prefix": PREFERENCE_CATEGORY_PREFIX,
+                    },
                 ),
             ):
                 counters = session.run(query, params).consume().counters
-                deleted += counters.nodes_deleted
-            print(f"Deleted {deleted} memory record(s).")
+                nodes_deleted += counters.nodes_deleted
+                relationships_deleted += counters.relationships_deleted
+            print(
+                f"Deleted {nodes_deleted} memory node(s) and "
+                f"{relationships_deleted} relationship(s)."
+            )
 
             session.run(
                 REMOVE_SHARED_PREFERENCE_MARKERS,

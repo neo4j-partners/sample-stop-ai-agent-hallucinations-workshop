@@ -58,8 +58,9 @@ Lab 5 as it ships creates three AWS resources and one local file:
 | Local config file | 1 | `deployment-tools/.bedrock_agentcore.yaml`, written by the starter toolkit |
 
 `workshop_cleanup.py` also enumerates the resources earlier versions of this workshop created, so an
-account that ran one of them is cleaned up by the same tag-gated path. On a fresh Lab 5 run every one
-of these prints as `not found` and nothing happens:
+account that ran one of them is cleaned up by the same tag-gated path. In an account that has never run
+an earlier version, every one of these prints as `not found` and nothing happens. In an account that
+has, they are present and tagged, and this run deletes them along with Lab 5's own three:
 
 | Resource Type | Count | Description |
 |--------------|-------|-------------|
@@ -117,7 +118,8 @@ without deleting it. This is the same safety rule above, applied to roles. It af
 deployed an earlier version of this workshop before tagging landed, bug B20: those roles were created
 without the `WorkshopResource` tag, so the current teardown refuses to remove them.
 
-Lab 5 as it ships creates neither role, so on a fresh run both are reported `not found`.
+Lab 5 as it ships creates neither role. In an account that never ran an earlier version, both are
+reported `not found`. Where an earlier run created them and tagging did land, they are deleted normally.
 
 There are two ways to clear the block. Pick one.
 
@@ -177,13 +179,13 @@ cd 05-agentcore-deploy
 uv run --with pytest --with-requirements requirements.txt -m pytest test_workshop_cleanup.py
 ```
 
-20 tests in `test_workshop_cleanup.py`, no AWS credentials needed. The clients are injected fakes. The
-headline test is `test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account
-shape that bug B6 damaged and asserts none of those roles is selected.
+20 tests, no AWS credentials needed. The clients are injected fakes. The headline test is
+`test_untagged_unrelated_roles_are_never_selected`, which reproduces the exact account shape that bug
+B6 damaged and asserts none of those roles is selected.
 
-Name the file explicitly. A bare `pytest` from this directory also collects
-`deployment-tools/test_runtime_integration.py`, which imports `bedrock_agentcore` and `strands` and
-only runs inside the deployed Runtime image, so collection errors out before the 20 tests report.
+A bare `pytest` from this directory collects 29: these 20 plus 9 in
+`deployment-tools/test_runtime_integration.py`, which pin the Runtime and Gateway boundary and also run
+offline. Name the file only when you want the teardown tests alone.
 
 ## What Does NOT Get Deleted
 
@@ -198,7 +200,45 @@ only runs inside the deployed Runtime image, so collection errors out before the
 - **The starter toolkit's shared CodeBuild role, `AmazonBedrockAgentCoreSDKCodeBuild-*`.** It is
   created by the toolkit, shared across projects, and costs nothing. Deleting it is what caused the
   original incident. If you want it gone, remove it by hand.
+- **The CodeBuild source bucket, `bedrock-agentcore-codebuild-sources-<account-id>-<region>`.** See
+  the section below.
 - **Anything untagged.**
+
+### The CodeBuild source bucket
+
+`5.1_agentcore_deploy.ipynb` never creates this bucket directly. The starter toolkit does, on the
+first `launch()`: it zips the `deployment-tools/` build context, uploads it to S3, and points
+CodeBuild at the object. The name is fixed by the toolkit as
+`bedrock-agentcore-codebuild-sources-<account-id>-<region>`.
+
+It stays behind for three reasons, all of them deliberate:
+
+1. **It is not tagged.** The toolkit creates it without tags, and `workshop_cleanup.py` deletes only
+   what carries `WorkshopResource=stop-ai-agent-hallucinations`. There is no S3 discoverer in the
+   script at all, so the bucket is not even reported as `UNTAGGED_BLOCKED`.
+2. **It is not exclusively ours.** One bucket per account per region serves every AgentCore
+   deployment there, not just this workshop's. Deleting it could break an unrelated deploy in the
+   same account.
+3. **Adding an S3 deleter would mean matching on the name.** That is the pattern bug B6 came from:
+   an earlier teardown matched IAM roles by name prefix and destroyed five roles this workshop never
+   created. Untagged resources get reported, never guessed at, and a resource that is not even ours
+   to begin with does not get a special case.
+
+**What it costs.** Close to nothing, and it largely empties itself. At creation the toolkit attaches
+a lifecycle rule named `DeleteOldBuilds` that expires objects after 7 days, and each uploaded source
+archive is a few megabytes. At S3 Standard rates that is a fraction of a cent per month while the
+objects live, and an empty bucket has no storage charge at all.
+
+**Removing it by hand.** Only once you are sure no other AgentCore deployment in that region is
+using it:
+
+```bash
+aws s3 rm s3://bedrock-agentcore-codebuild-sources-<account-id>-<region> --recursive
+aws s3 rb s3://bedrock-agentcore-codebuild-sources-<account-id>-<region>
+```
+
+Get `<account-id>` from `aws sts get-caller-identity --query Account --output text`, and use the
+same region Lab 5 deployed into.
 
 ## Neo4j Teardown Is Separate
 
@@ -269,4 +309,9 @@ deletes it. Only an untagged builder project from an older run survives, and tha
 
 ## Estimated Time
 
-2-3 minutes. Enumerating IAM role tags across a large account adds roughly a minute to the plan step.
+2-3 minutes for `workshop_cleanup.py --yes`. Enumerating IAM role tags across a large account dominates
+the plan step, measured at roughly 145 seconds on a development account holding 426 roles.
+
+`5.2_teardown.ipynb` takes about three times that, because it builds the plan three times: once for the
+dry run you read, once inside the deletion pass, and once again to verify nothing is left. That is the
+point of the notebook, and it is why a ten-minute command timeout is too short for it. Run it detached.

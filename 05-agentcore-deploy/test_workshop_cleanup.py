@@ -358,7 +358,7 @@ def make_clients(
 
 
 class TestTagScoping(unittest.TestCase):
-    """B6 — deletion must be scoped by tag, never by name prefix."""
+    """B6: deletion must be scoped by tag, never by name prefix."""
 
     def test_untagged_unrelated_roles_are_never_selected(self) -> None:
         recorder = Recorder()
@@ -470,7 +470,7 @@ class TestTagScoping(unittest.TestCase):
 
 
 class TestMemory(unittest.TestCase):
-    """B5 — Memory must be matched on ``id``; there is no ``memoryName``."""
+    """B5: Memory must be matched on ``id``; there is no ``memoryName``."""
 
     #: Exactly the keys the live API returned. Any code reading ``memoryName``
     #: raises KeyError against this, which is the bug.
@@ -569,7 +569,7 @@ class PaginatedAgentCore(FakeAgentCore):
 
 
 class TestPagination(unittest.TestCase):
-    """B50/V6 — discovery must read every page, not just the first."""
+    """B50/V6: discovery must read every page, not just the first."""
 
     def test_tagged_memory_on_second_page_is_discovered(self) -> None:
         recorder = Recorder()
@@ -601,7 +601,7 @@ class TestPagination(unittest.TestCase):
 
 
 class TestAsyncDeletionWaits(unittest.TestCase):
-    """B42 — 'still deleting' and 'failed' are different states.
+    """B42: 'still deleting' and 'failed' are different states.
 
     The old code reported deletion the moment the API accepted the request, and
     a resource that was merely mid-delete surfaced as exit 1. These tests pin
@@ -750,7 +750,7 @@ class TestDryRun(unittest.TestCase):
 
 
 class TestIamRetryConfig(unittest.TestCase):
-    """F8 — the IAM client must ride out throttling, not abort the whole plan.
+    """F8: the IAM client must ride out throttling, not abort the whole plan.
 
     ``discover_roles`` issues one ``list_role_tags`` per role in the account, so
     a busy account throttles it. Without a retry config that ``ClientError``
@@ -822,8 +822,8 @@ class FakeBusyDynamo:
     """A DynamoDB table stuck in ``CREATING``: ``delete_table`` always rejects.
 
     ``delete_table`` on a table that is still being created raises
-    ``ResourceInUseException`` — the table is fully present and the delete did
-    not happen (F10).
+    ``ResourceInUseException``, meaning the table is fully present and the
+    delete did not happen (F10).
     """
 
     def __init__(
@@ -848,7 +848,7 @@ class FakeBusyDynamo:
 
 
 class TestResourceInUseRetry(unittest.TestCase):
-    """F10 — ResourceInUseException means the delete did not happen; retry it.
+    """F10: ResourceInUseException means the delete did not happen; retry it.
 
     The old code classified it as an in-flight delete, added the table to
     ``deleted``, and polled it for the full timeout. The table was never on its
@@ -875,7 +875,7 @@ class TestResourceInUseRetry(unittest.TestCase):
         delete_calls = [name for name in recorder.names if name == "delete_table"]
         self.assertEqual(len(delete_calls), wc._DELETE_MAX_ATTEMPTS)
 
-        # And the busy table is a genuine ResourceInUseException failure — never
+        # And the busy table is a genuine ResourceInUseException failure, never
         # misreported as an in-flight delete that gets polled to absence. That
         # path would surface a "still present ... deadline expired" failure after
         # a single delete call, so this pins the corrected classification.

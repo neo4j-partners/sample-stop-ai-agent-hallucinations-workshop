@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Demo 06 AgentCore Runtime entry point.
+"""Lab 5 AgentCore Runtime entry point.
 
 The Runtime exposes one in-process, read-only retrieval tool and discovers one
 reservation-request command from its pre-provisioned AgentCore Gateway. This
@@ -31,6 +31,12 @@ from workshop.hybrid_retrieval import (
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5"
+
+# `demo06` is a real provisioned identifier, not a stale label for Lab 5.
+# `setup/provision_agentcore.py` names the Gateway target with its `demo06`
+# prefix, and AgentCore Gateway derives the MCP tool name by joining the target
+# name and the schema tool name with three underscores. Change the prefix here
+# and the discovery check below stops matching the deployed Gateway.
 GATEWAY_TARGET_NAME = "demo06-reservation-request"
 GATEWAY_SCHEMA_TOOL = "create_reservation_request"
 GATEWAY_COMMAND_TOOL = f"{GATEWAY_TARGET_NAME}___{GATEWAY_SCHEMA_TOOL}"
@@ -102,9 +108,13 @@ def search_hotel_knowledge(query: str) -> str:
 
 
 def _runtime_region() -> str:
-    return os.environ.get(
-        "AWS_REGION",
-        os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+    # Same resolution order as setup/provision_agentcore.py: AWS_REGION, then
+    # AWS_DEFAULT_REGION, then us-east-1. The `or` chain matters, because an
+    # empty AWS_REGION has to fall through rather than be taken as the answer.
+    return (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "us-east-1"
     )
 
 
@@ -196,7 +206,10 @@ def invoke(
                 model_id=os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
                 region_name=_runtime_region(),
             )
-            agent = Agent(
+            # Same name Lab 3 gave it and Lab 4 carried forward. The agent is
+            # the constant across the workshop; only where it runs changes.
+            hotel_agent = Agent(
+                name="hotel_agent",
                 model=model,
                 tools=[search_hotel_knowledge, *command_tools],
                 system_prompt=SYSTEM_PROMPT,
@@ -207,7 +220,7 @@ def invoke(
                 if request_id is not None
                 else ""
             )
-            result = agent(f"{prompt}{caller_context}")
+            result = hotel_agent(f"{prompt}{caller_context}")
     except Exception as error:
         LOGGER.error(
             "runtime_invocation_failed request_id=%s error_type=%s",

@@ -1,6 +1,6 @@
 {
   "name": "demo06-reservation-request",
-  "description": "The only Demo 06 Gateway target. Validates policy and records one Neo4j ReservationRequest.",
+  "description": "The only Lab 5 Gateway target. Validates policy and records one Neo4j ReservationRequest.",
   "credentialProviderConfigurations": [
     {
       "credentialProviderType": "GATEWAY_IAM_ROLE"

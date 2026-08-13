@@ -1,6 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Tag-scoped teardown for the AgentCore workshop (Modules 6 and 7).
+"""Tag-scoped teardown for Lab 5, the AgentCore deploy.
+
+Deletes what ``5.1_agentcore_deploy.ipynb`` created. It is one half of teardown:
+``setup/provision_agentcore.py teardown`` removes the other half, tagged
+``demo06-agentcore=true``. Run both, or the half you skipped keeps billing.
 
 Safety contract
 ---------------
@@ -53,21 +57,57 @@ WORKSHOP_TAG_VALUE = "stop-ai-agent-hallucinations"
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
+# What Lab 5 creates today
+# ------------------------
+# `5.1_agentcore_deploy.ipynb` launches one AgentCore Runtime named
+# RUNTIME_NAME, and the starter toolkit creates one ECR repository and one
+# CodeBuild project derived from that name. Those three, plus the local starter
+# toolkit config file, are the live set. Everything else named below is a legacy
+# name.
+#
+# Why the legacy names stay
+# -------------------------
+# Earlier versions of this workshop created DynamoDB tables, eight booking
+# Lambdas, a Neo4j Lambda layer, its own Gateway, a memory-carrying Runtime, and
+# an AgentCore Memory resource. None of that exists in the current six-lab path.
+# The names are kept as discovery targets so a participant who ran an earlier
+# version still gets those resources found, reported, and deleted if they carry
+# the workshop tag. A name that matches nothing is reported ABSENT and costs one
+# read call, so keeping them is cheap and dropping them would strand real
+# resources on somebody's bill. The dry-run output folds the absent ones into a
+# single summary line rather than printing all of them.
+#
+# Names are discovery targets only. Nothing here is deleted on a name match:
+# every AWS resource below still has to carry the workshop tag. See
+# UNTAGGABLE_KINDS for the only two exceptions.
+
+# Legacy: DynamoDB held hotel, booking, and steering-rule data before Neo4j did.
 HOTELS_TABLE = "workshop-Hotels"
 BOOKINGS_TABLE = "workshop-Bookings"
 STEERING_RULES_TABLE = "workshop-SteeringRules"
 TABLE_NAMES = [HOTELS_TABLE, BOOKINGS_TABLE, STEERING_RULES_TABLE]
 
+# Legacy: two shared roles. Lab 5's roles are the three `demo06-*` roles that
+# setup/provision_agentcore.py owns and tears down under its own tag.
 LAMBDA_ROLE_NAME = "workshop-LambdaExecutionRole"
 AGENTCORE_ROLE_NAME = "workshop-AgentCoreExecutionRole"
 ROLE_NAMES = [LAMBDA_ROLE_NAME, AGENTCORE_ROLE_NAME]
 
+# Legacy: the deploy notebook used to create its own Gateway. Lab 5's Gateway is
+# `demo06-gateway`, created and deleted by setup/provision_agentcore.py.
 GATEWAY_NAME = "HotelBookingGateway"
+# Live: the name 5.1_agentcore_deploy.ipynb launches under. Both files have to
+# agree on it, or teardown cannot find what the deploy created.
 RUNTIME_NAME = "HotelBookingAgent"
+# Legacy: a second Runtime from the earlier memory module.
 MEMORY_RUNTIME_NAME = "HotelBookingAgentWithMemory"
 RUNTIME_NAMES = [RUNTIME_NAME, MEMORY_RUNTIME_NAME]
+# Legacy: Lab 6's memory is graph-native and goes away with the database, so
+# nothing in the current path creates an AgentCore Memory resource.
 MEMORY_NAME = "workshop_HotelBookingMemory"
 
+# Legacy: the eight booking-lifecycle Lambdas. Lab 5 has exactly one Lambda,
+# `demo06-reservation-request`, owned by setup/provision_agentcore.py.
 LAMBDA_TOOLS = [
     "search_available_hotels",
     "book_hotel",
@@ -79,8 +119,12 @@ LAMBDA_TOOLS = [
     "query_knowledge_graph",
 ]
 LAMBDA_FUNCTIONS = [f"hotel-booking-{tool}" for tool in LAMBDA_TOOLS]
+# Legacy: the Neo4j driver used to ship to Lambda as a layer.
 LAMBDA_LAYER_NAME = "workshop-neo4j-driver"
 
+# Live for RUNTIME_NAME, legacy for MEMORY_RUNTIME_NAME. The starter toolkit
+# derives both names from the Runtime name, which is why 5.1 can tag them by
+# exact name rather than by enumerating the account.
 ECR_REPOS = [f"bedrock-agentcore-{name.lower()}" for name in RUNTIME_NAMES]
 CODEBUILD_PROJECTS = [f"{repo}-builder" for repo in ECR_REPOS]
 
@@ -180,7 +224,7 @@ class Candidate:
                 f"tagged {WORKSHOP_TAG_KEY}={WORKSHOP_TAG_VALUE}"
             ),
             Selection.UNTAGGED_BLOCKED: (
-                "EXISTS but is NOT tagged — refusing to delete"
+                "EXISTS but is NOT tagged, refusing to delete"
             ),
             Selection.ABSENT: "not found",
             Selection.UNTAGGABLE_EXACT_NAME: (
@@ -209,7 +253,7 @@ def _kv_list_to_dict(items: list[dict[str, str]], key: str, value: str) -> dict[
 def memory_id_matches_name(memory_id: str, memory_name: str) -> bool:
     """AgentCore Memory ids have the form ``<name>-<suffix>``.
 
-    ``list_memories`` returns no name field at all — the ``MemorySummary`` shape
+    ``list_memories`` returns no name field at all. The ``MemorySummary`` shape
     is ``arn, id, status, createdAt, updatedAt, managedByResourceArn``. Reading
     ``m["memoryName"]`` raises ``KeyError`` on every item, which is bug B5.
 
@@ -265,7 +309,7 @@ def _error_code_in(error: ClientError, *codes: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Discovery — every function below returns candidates without deleting anything
+# Discovery: every function below returns candidates without deleting anything
 # --------------------------------------------------------------------------
 
 
@@ -458,7 +502,7 @@ def discover_roles(clients: Clients) -> Iterator[Candidate]:
             kind="iam-role",
             name=role_name,
             selection=Selection.UNTAGGED_BLOCKED,
-            detail="workshop role name but no workshop tag — tag it at creation or remove it by hand",
+            detail="workshop role name but no workshop tag: tag it at creation or remove it by hand",
         )
 
 
@@ -554,7 +598,7 @@ def build_plan(clients: Clients) -> list[Candidate]:
 
 
 # --------------------------------------------------------------------------
-# Absence probes — "is it actually gone yet?"
+# Absence probes: "is it actually gone yet?"
 #
 # Each probe returns None when the resource is gone, or a short human-readable
 # state string when it is still there. A state string is not a failure on its
@@ -667,7 +711,7 @@ def wait_until_gone(
                     candidate.kind,
                     candidate.name,
                     f"still present when tier {label!r} deadline expired "
-                    f"({timeout:.0f}s, {state}) — this is a real leak, not a race",
+                    f"({timeout:.0f}s, {state}). This is a real leak, not a race",
                 )
             )
             print(
@@ -867,18 +911,41 @@ def execute_plan(
 
 
 def print_plan(plan: list[Candidate], *, dry_run: bool, region: str) -> None:
-    header = "DRY RUN — nothing will be deleted" if dry_run else "TEARDOWN PLAN"
+    """Print one line per resource that exists, and one summary line for the rest.
+
+    Most names this teardown searches for are legacy names from earlier versions
+    of the workshop, so a clean account produces around twenty ABSENT lines and
+    a handful of real ones. Printing all of them buried the lines that matter.
+    Absent candidates are counted by kind on a single line instead; nothing is
+    hidden, because absent means there is nothing to act on.
+    """
+    header = "DRY RUN, nothing will be deleted" if dry_run else "TEARDOWN PLAN"
     print("=" * 100)
     print(f"{header}   region={region}   gate={WORKSHOP_TAG_KEY}={WORKSHOP_TAG_VALUE}")
     print("=" * 100)
-    for candidate in plan:
-        print(candidate.describe())
+
+    present = [c for c in plan if c.selection is not Selection.ABSENT]
+    absent = [c for c in plan if c.selection is Selection.ABSENT]
+
+    if present:
+        for candidate in present:
+            print(candidate.describe())
+    else:
+        print("No workshop resource found in this region.")
+
+    if absent:
+        counts: dict[str, int] = {}
+        for candidate in absent:
+            counts[candidate.kind] = counts.get(candidate.kind, 0) + 1
+        breakdown = ", ".join(f"{kind} x{n}" for kind, n in sorted(counts.items()))
+        print(f"SKIP    {len(absent)} name(s) not found in this region: {breakdown}")
+
     selected = [c for c in plan if c.will_delete]
     blocked = [c for c in plan if c.selection is Selection.UNTAGGED_BLOCKED]
     print("-" * 100)
     print(f"selected for deletion: {len(selected)}")
     print(f"blocked (present, untagged): {len(blocked)}")
-    print(f"absent: {sum(1 for c in plan if c.selection is Selection.ABSENT)}")
+    print(f"absent: {len(absent)}")
 
 
 def run(clients: Clients, *, dry_run: bool) -> int:
@@ -892,7 +959,7 @@ def run(clients: Clients, *, dry_run: bool) -> int:
 
     blocked = [c for c in plan if c.selection is Selection.UNTAGGED_BLOCKED]
     if blocked:
-        print("\nBLOCKED — these exist under workshop names but carry no workshop tag:", file=sys.stderr)
+        print("\nBLOCKED, these exist under workshop names but carry no workshop tag:", file=sys.stderr)
         for candidate in blocked:
             print(f"  {candidate.kind} {candidate.name}", file=sys.stderr)
         print(

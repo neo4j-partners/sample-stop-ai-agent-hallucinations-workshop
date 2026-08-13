@@ -35,12 +35,16 @@ MAX_GUESTS_RULE_ID: Final = "demo-06-maximum-guests"
 MAX_GUESTS: Final = 10
 OVER_LIMIT_GUESTS: Final = 15
 
-LOCAL_NEO4J_ENV: Final = (
+REQUIRED_NEO4J_ENV: Final = (
     "NEO4J_URI",
     "NEO4J_USERNAME",
     "NEO4J_PASSWORD",
-    "NEO4J_DATABASE",
 )
+# Aura's default database is always `neo4j`, and a participant whose .env omits
+# the name should not get a different failure in Lab 2 than in Lab 1. The build
+# path defaults it, so the read and write paths default it the same way.
+DEFAULT_NEO4J_DATABASE: Final = "neo4j"
+LOCAL_NEO4J_ENV: Final = (*REQUIRED_NEO4J_ENV, "NEO4J_DATABASE")
 READ_SECRET_ID_ENV: Final = "NEO4J_READ_SECRET_ID"
 COMMAND_SECRET_ID_ENV: Final = "NEO4J_COMMAND_SECRET_ID"
 SECRET_FIELDS: Final = ("uri", "username", "password", "database")

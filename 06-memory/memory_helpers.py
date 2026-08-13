@@ -7,9 +7,9 @@ instance as the hotel knowledge graph, so memory nodes (``Conversation``,
 ``Message``, ``Preference``, ``User``) land beside the domain nodes where
 they can be inspected with plain Cypher.
 
-The construction pattern is adapted from the earlier GraphRAG workshop's
-``Lab_5_Agent_Memory/lib/memory_utils.py`` and solves the same non-obvious
-problems:
+The construction pattern is adapted from a different, earlier GraphRAG
+workshop (its ``Lab_5_Agent_Memory/lib/memory_utils.py``, no relation to this
+repository's Lab 5) and solves the same non-obvious problems:
 
 - **Explicit embedder:** in ``neo4j-agent-memory`` 0.5.0 the client builds a
   concrete embedder from ``EmbeddingConfig`` for OpenAI and
@@ -66,9 +66,21 @@ from neo4j_agent_memory import Neo4jConfig as MemoryNeo4jConfig
 from neo4j_agent_memory.embeddings.bedrock import BedrockEmbedder
 from pydantic import SecretStr
 
-# Decision 2 in the Demo 08 plan: the memory vector indexes use Titan Text
-# Embeddings V2, a separate embedding contract from the Nova model that
-# embeds the hotel chunks. Titan V2 produces 1024-dimensional vectors.
+# The hero hotel's name has one definition, in the shared package Lab 1 builds
+# the graph with, and is re-exported under this lab's name so the notebook and
+# the tests keep importing it from here. workshop.graph_setup opens no driver
+# and reads no credentials at import, so this stays safe on the offline path.
+#
+# Lab 1 also stamps a fixture hotel_id on this node, but this lab looks it up
+# by name anyway: the name is what the participant reads in the notebook
+# output, in the Neo4j Browser query at the end of section 5, and in the
+# failure message when Lab 1 has not run, so the lookup key and the label on
+# screen stay the same string.
+from workshop.graph_setup import HERO_NAME as HERO_HOTEL_NAME
+
+# The memory vector indexes use Titan Text Embeddings V2, a separate embedding
+# contract from the Nova model that embeds the hotel chunks. Titan V2 produces
+# 1024-dimensional vectors.
 MEMORY_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 MEMORY_EMBEDDING_DIMENSIONS = 1024
 
@@ -78,25 +90,27 @@ MEMORY_EMBEDDING_DIMENSIONS = 1024
 MEMORY_VECTOR_INDEXES = ("message_embedding_idx", "preference_embedding_idx")
 
 # Workshop ownership marker for the memory records this demo writes, following
-# Demo 06's convention (contracts.WORKSHOP_OWNER = "neo4j-ftw-demo-6").
+# Lab 4's convention (contracts.WORKSHOP_OWNER = "neo4j-ftw-demo-6").
 # cleanup_memory.py deletes only records carrying this marker, so cleanup can
 # never reach the hotel graph or another module's data.
 WORKSHOP_OWNER = "neo4j-ftw-demo-8"
 
 # Every session id and user identifier the scenario notebook writes starts
-# with this prefix. Cleanup sweeps the prefix as well as the ownership
-# marker, so records from a run that failed before the tagging step are
-# still removed.
+# with this prefix. The digits are 08 because this lab was Demo 08 before the
+# renumber; the value is arbitrary and only its stability matters. Cleanup
+# sweeps the prefix as well as the ownership marker, so records from a run
+# that failed before the tagging step are still removed.
 DEMO_ID_PREFIX = "demo08-"
 
-# One committed fixture keeps the participant path deterministic. The current
-# Module 1 graph does not assign stable hotel ids, so this exact fixture name is
-# the narrow lookup key until that shared schema adds one.
-HERO_HOTEL_NAME = "AnyCompany Cairo Nile View"
+# Preferences carry no session id or identifier, so the namespace has to live
+# somewhere on the node itself. Every preference this lab writes puts it in
+# ``category``, which gives cleanup a prefix handle on a preference whose run
+# died before the tagging cell.
+PREFERENCE_CATEGORY_PREFIX = f"hotels-{DEMO_ID_PREFIX}"
 
-# Decision 3 in the Demo 08 plan: preference-to-message provenance is one
-# explicit workshop-owned relationship, because the library links extracted
-# entities to their source messages but has no equivalent for preferences.
+# Preference-to-message provenance is one explicit workshop-owned
+# relationship, because the library links extracted entities to their source
+# messages but has no equivalent for preferences.
 PROVENANCE_RELATIONSHIP = "DERIVED_FROM"
 HOTEL_RELATIONSHIP = "ABOUT_HOTEL"
 
@@ -163,7 +177,8 @@ def build_memory_settings(config: MemoryDemoConfig) -> MemorySettings:
     constructed, and entity extraction is off (``ExtractorType.NONE``). The
     demo writes memory explicitly, so nothing needs a model to extract
     entities from text. ``multi_tenant=True`` makes every write require a
-    ``user_identifier`` (Demo 08 plan, decision 6).
+    ``user_identifier``, which is what turns the actor-isolation lesson from a
+    convention into an enforced one.
     """
     # 0.5.0 requires this object to size the indexes even though its settings
     # layer emits a migration warning saying the same shape is deprecated.
@@ -296,6 +311,21 @@ def link_preference_to_message_and_hotel(
     return bool(rows and rows[0]["linked"])
 
 
+# The recall path, kept as a module constant so the notebook can print the
+# exact Cypher it just ran. Isolation is the shape of this query: it starts at
+# one User, so a preference that actor does not own is not reachable at all.
+ACTOR_PREFERENCE_RECALL = f"""
+CYPHER 25
+MATCH (u:User {{identifier: $user_identifier}})
+      -[:HAS_PREFERENCE]->(p:Preference)
+      -[:{HOTEL_RELATIONSHIP}]->(h:Hotel {{name: $hotel_name}})
+WHERE p.preference IS NOT NULL
+RETURN p.id AS id, p.category AS category,
+       p.preference AS preference, h.name AS hotel
+ORDER BY p.preference
+""".strip()
+
+
 def get_actor_preferences_for_hotel(
     config: MemoryDemoConfig,
     user_identifier: str,
@@ -311,16 +341,7 @@ def get_actor_preferences_for_hotel(
     """
     return _run_query(
         config,
-        f"""
-        CYPHER 25
-        MATCH (u:User {{identifier: $user_identifier}})
-              -[:HAS_PREFERENCE]->(p:Preference)
-              -[:{HOTEL_RELATIONSHIP}]->(h:Hotel {{name: $hotel_name}})
-        WHERE p.preference IS NOT NULL
-        RETURN p.id AS id, p.category AS category,
-               p.preference AS preference, h.name AS hotel
-        ORDER BY p.preference
-        """,
+        ACTOR_PREFERENCE_RECALL,
         {"user_identifier": user_identifier, "hotel_name": hotel_name},
         driver=driver,
     )

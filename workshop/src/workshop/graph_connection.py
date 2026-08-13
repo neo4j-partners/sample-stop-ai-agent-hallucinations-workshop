@@ -3,7 +3,7 @@
 """Neo4j connection settings shared by every lab that opens a driver.
 
 `NEO4J_USERNAME` defaults to `"neo4j"`, which is what Aura provisions; the older
-`NEO4J_USER` spelling is not read. There is no default for `NEO4J_PASSWORD` — it
+`NEO4J_USER` spelling is not read. There is no default for `NEO4J_PASSWORD`. It
 is required, and a missing value raises at import rather than silently sending a
 bad credential the way a baked-in default password would.
 

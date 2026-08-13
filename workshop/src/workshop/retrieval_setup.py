@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
-"""Index setup and readiness checks shared by Demo 01 build paths.
+"""Index setup and readiness checks shared by the Lab 1 build paths.
 
 The notebook only retrieves. Graph preparation owns index creation and checks
-the deterministic fixtures that every Demo 01 and Demo 01b example needs.
+the deterministic fixtures every Lab 1 build path needs.
 """
 
 from __future__ import annotations
@@ -280,7 +280,7 @@ def fixture_problems(driver: Driver) -> list[str]:
 def report_readiness(driver: Driver, expected_documents: int) -> list[str]:
     """Print readiness counts and return all graph fixture problems."""
     documents, chunks, labels, relationships = graph_counts(driver)
-    print("\nDemo 01 readiness report:")
+    print("\nLab 1 readiness report:")
     print(f"  documents: {documents} (expected {expected_documents})")
     print(f"  chunks: {chunks} (expected {documents})")
     print(f"  extracted labels: {labels}")
