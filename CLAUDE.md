@@ -33,7 +33,7 @@ Read the root `README.md` for the Platform Responsibilities and Data Ownership t
 - Four notebooks in the tree are source material the rebuild drew from, kept for reference and deliberately absent from the runner's registry: `02-retrieval/retrieval_patterns.ipynb`, `04-grounded-write/01_hybrid_retrieval.ipynb`, `workshop-delivery/archive/deploy_agentcore.ipynb`, and `05-agentcore-deploy/advanced-deployment/02_agentcore_walkthrough.ipynb`. Do not edit them to fix a lab; edit the `N.M_*.ipynb` notebook the lab actually ships.
 - `backups/` and `logs/` hold historical run logs and design notes. Read for context on prior decisions; treat as append-only history, not living docs.
 - `workshop-delivery/internal/` holds the rebuild record: `new-content-plan.md`, the twelve-phase plan whose per-phase Findings record the gotchas that were hit for real, and `new-content.md`, the content brief it was written against. The directory is gitignored, so a fresh clone will not have it. It is facilitator material, never participant material, and no shipped file should link to it.
-- `.github/workflows/offline-gate.yml` is the CI gate. It runs the notebook runner with no credentials present and the four per-lab pytest suites, and it asserts each suite's count so the numbers quoted below cannot drift unnoticed.
+- `.github/workflows/offline-gate.yml` is the CI gate. It runs `setup/check_workshop_inventory.py`, the notebook runner with no credentials present, the two shared suites, and the four per-lab pytest suites, and it asserts every suite's count so the numbers quoted below cannot drift unnoticed.
 
 ## Commands
 
@@ -78,7 +78,7 @@ A clean run only proves cells did not raise. It does not validate narrative or m
 
 ### Tests
 
-Tests are per-lab and run from inside that lab's directory. There is no single top-level test command.
+Most tests are per-lab and run from inside that lab's directory. There is no single command that runs everything.
 
 ```bash
 cd 01-graph-build     && uv run --with pytest --with-requirements requirements.txt -m pytest   # 12 tests
@@ -86,6 +86,14 @@ cd 04-grounded-write  && uv run --with pytest --with-requirements requirements.t
 cd 06-memory          && uv run --with pytest --with-requirements requirements.txt -m pytest   # 40 tests
 cd 05-agentcore-deploy && uv run --with pytest --with-requirements requirements.txt -m pytest  # 29 tests
 ```
+
+Two suites sit outside the lab folders and belong to no lab, so nothing above reaches them. Run them from the repository root:
+
+```bash
+uv run --with pytest --with-editable ./workshop -m pytest workshop/tests setup/test_run_notebooks.py   # 6 tests
+```
+
+They cover the two pieces of shared machinery no lab suite exercises: `workshop/tests/test_env_file.py` covers the atomic `.env` writer that both `setup/provision_agentcore.py` and `5.1_agentcore_deploy.ipynb` write through, and `setup/test_run_notebooks.py` covers the `WORKSHOP_RUNNER` marker that keeps a default runner pass from writing to a live graph. Both counts are asserted in CI alongside the four lab counts.
 
 Lab 5's 29 are 20 in `test_workshop_cleanup.py` plus 9 in `deployment-tools/test_runtime_integration.py`, and a bare `pytest` collects both. That second file used to die on collection with a stale `import contracts` left behind when the module moved into the shared package, which silently disabled all 9. Its imports of `bedrock_agentcore` and `mcp` are not the problem and never were: `05-agentcore-deploy/requirements.txt` declares both so they resolve in the lab venv. If those 9 stop collecting, suspect an import, not a missing dependency.
 

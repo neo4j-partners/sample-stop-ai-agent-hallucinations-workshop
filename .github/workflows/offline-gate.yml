@@ -1,12 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
-# The offline gate. It proves two things on every push.
+# The offline gate. It proves four things on every push.
 #
-# 1. The whole notebook registry runs green with no Neo4j and no AWS credentials
+# 1. The workshop inventory agrees with the runner, the notebooks on disk, and
+#    the lab READMEs, and every notebook that claims nbformat 4.5 gives its
+#    cells an id. Without that last check the nbstripout commit filter warns on
+#    every commit, and nbformat intends to make the warning an error.
+# 2. The whole notebook registry runs green with no Neo4j and no AWS credentials
 #    anywhere in the environment, which is what a participant sees before they
 #    have filled in their .env.
-# 2. Each lab's test suite still holds the count the READMEs quote. The counts
+# 3. The two shared suites outside the lab folders still hold their count.
+# 4. Each lab's test suite still holds the count the READMEs quote. The counts
 #    are asserted here so a suite that silently stops collecting, or one that
 #    grows without the docs following, fails the build instead of drifting.
 #
@@ -83,6 +88,40 @@ jobs:
             grep -E '^Passed:' runner.log || tail -20 runner.log
             exit 1
           fi
+
+  shared-tests:
+    name: Shared package and runner (6 tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # These two suites sit outside the per-lab folders, so the matrix below
+      # never reaches them. They cover the two pieces of shared machinery that
+      # no lab suite exercises: the atomic .env writer both the provisioner and
+      # 5.1 depend on, and the runner marker that keeps a default run from
+      # writing to a live graph. Counted for the same reason the lab suites are.
+      - name: Assert the collected test count
+        run: |
+          uv run --with pytest --with-editable ./workshop -m pytest \
+            workshop/tests setup/test_run_notebooks.py --collect-only -q | tee collected.log
+          actual=$(grep -oE '^[0-9]+ tests? collected' collected.log | head -1 | cut -d' ' -f1)
+          if [ "$actual" != "6" ]; then
+            echo "Shared suites collect $actual tests, expected 6."
+            echo "Update the counts in CLAUDE.md and this workflow together."
+            exit 1
+          fi
+          echo "Shared suites collect $actual tests."
+
+      - name: Run the suites
+        run: |
+          uv run --with pytest --with-editable ./workshop -m pytest \
+            workshop/tests setup/test_run_notebooks.py -q
 
   tests:
     name: ${{ matrix.lab }} (${{ matrix.expected }} tests)

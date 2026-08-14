@@ -13,6 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INVENTORY_PATH = REPO_ROOT / "workshop-inventory.json"
 RUNNER_PATH = REPO_ROOT / "setup" / "run_notebooks.py"
 
+# Directories that hold generated runs, virtual environments, and historical
+# logs rather than notebooks the repository ships or commits.
+UNTRACKED_DIRS = frozenset(
+    {".git", ".venv", ".ipynb_checkpoints", "notebook-output", "backups", "logs"}
+)
+
 
 def _path_parts(node: ast.expr) -> list[str]:
     """Read a ``REPO_ROOT / "folder" / "file"`` expression safely."""
@@ -49,6 +55,49 @@ def load_runner_registry() -> list[tuple[str, str]]:
             registry.append((lab, relative_path))
         return registry
     raise ValueError("NOTEBOOKS registry not found")
+
+
+def tracked_notebooks() -> list[Path]:
+    """Every notebook the repository commits, in a stable order."""
+    return sorted(
+        path
+        for path in REPO_ROOT.rglob("*.ipynb")
+        if UNTRACKED_DIRS.isdisjoint(path.relative_to(REPO_ROOT).parts)
+    )
+
+
+def check_notebook_cell_ids() -> list[str]:
+    """Report notebooks that claim nbformat 4.5 without giving cells an id.
+
+    From nbformat 4.5 a cell ``id`` is mandatory. A notebook that declares the
+    version but omits the field still opens, because nbformat fills the field
+    in on read and only warns, but the warning is emitted on every commit by
+    the nbstripout filter and nbformat intends to make it an error. Checking
+    the JSON directly keeps this script free of third-party dependencies, the
+    same reason the runner registry is parsed rather than imported.
+    """
+    problems: list[str] = []
+    for path in tracked_notebooks():
+        relative_path = path.relative_to(REPO_ROOT)
+        try:
+            notebook = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            problems.append(f"{relative_path} is not readable JSON: {error}")
+            continue
+        if notebook.get("nbformat_minor", 0) < 5:
+            continue
+        missing = [
+            index
+            for index, cell in enumerate(notebook.get("cells", []))
+            if not cell.get("id")
+        ]
+        if missing:
+            problems.append(
+                f"{relative_path} declares nbformat 4.5 but "
+                f"{len(missing)} of {len(notebook.get('cells', []))} cells have "
+                f"no id, first at index {missing[0]}"
+            )
+    return problems
 
 
 def main() -> int:
@@ -147,6 +196,8 @@ def main() -> int:
             problems.append(
                 f"{target['file']} is missing inventory values: {missing}"
             )
+
+    problems.extend(check_notebook_cell_ids())
 
     if problems:
         print("Workshop inventory check failed:")
