@@ -167,22 +167,91 @@ class RuntimeIntegrationTests(unittest.TestCase):
         )
         self.assertIsNone(recorder.last_result)
 
-    def test_local_tool_returns_bounded_retrieval_as_json(self) -> None:
-        evidence = [{"hotel_id": "fixture-id", "chunk_evidence": "grounded"}]
+    def test_retrieval_tool_preserves_evidence_and_adds_grounding_result(self) -> None:
+        evidence = [
+            {
+                "hotel_id": "fixture-id",
+                "hotel_name": "AnyCompany Cairo Nile View",
+                "address": "Cairo",
+                "guest_rating": 4.8,
+                "amenities": ["Nile views"],
+                "exact_terms": ["Cairo"],
+                "chunk_evidence": "grounded",
+            }
+        ]
+        query = "Does the Cairo hotel guarantee availability next weekend?"
         with patch.object(
             booking_agent,
             "_search_hotel_knowledge",
             return_value=evidence,
         ) as search:
-            result = booking_agent.search_hotel_knowledge(query="Cairo")
+            result = booking_agent.search_hotel_knowledge(query=query)
 
-        self.assertEqual(json.loads(result), evidence)
-        search.assert_called_once_with("Cairo")
+        payload = json.loads(result)
+        self.assertEqual(payload["evidence"], evidence)
+        self.assertIs(payload["grounding_result"]["answerable"], False)
+        self.assertEqual(
+            payload["grounding_result"]["missing_fact"],
+            "live_room_availability",
+        )
+        self.assertEqual(
+            payload["grounding_result"]["evidence_ids"],
+            ["fixture-id"],
+        )
+        search.assert_called_once_with(query)
+
+        hero_verdict = booking_agent._grounding_result(
+            "What amenities and guest rating does the Cairo hotel have?",
+            evidence,
+        )
+        self.assertIs(hero_verdict["answerable"], True)
+        self.assertIsNone(hero_verdict["missing_fact"])
+
+        missing_hotel = booking_agent._grounding_result(
+            "What guest rating does the missing hotel have?",
+            [],
+        )
+        self.assertIs(missing_hotel["answerable"], False)
+        self.assertEqual(missing_hotel["missing_fact"], "matching_hotel_evidence")
+
+        verdict = {
+            "answerable": False,
+            "supported_facts": ["hotel_identity"],
+            "missing_fact": "live_room_availability",
+            "evidence_ids": ["fixture-id"],
+        }
+        recorder = booking_agent.GroundingResultRecorder()
+        recorder._record(
+            SimpleNamespace(
+                tool_use={"name": "search_hotel_knowledge"},
+                result={
+                    "status": "success",
+                    "content": [
+                        {
+                            "text": json.dumps(
+                                {"evidence": [], "grounding_result": verdict}
+                            )
+                        }
+                    ],
+                },
+            )
+        )
+        self.assertEqual(recorder.last_result, verdict)
+
+        recorder._record(
+            SimpleNamespace(
+                tool_use={"name": booking_agent.GATEWAY_COMMAND_TOOL},
+                result={"status": "success", "content": []},
+            )
+        )
+        self.assertEqual(recorder.last_result, verdict)
 
     def test_prompt_requires_grounding_and_visible_rejection(self) -> None:
         prompt = booking_agent.SYSTEM_PROMPT.casefold()
         normalized = " ".join(prompt.split())
         self.assertIn("use search_hotel_knowledge before", normalized)
+        self.assertIn("grounding_result as binding", normalized)
+        self.assertIn("when answerable is false", normalized)
         self.assertIn("stable hotel id returned by that search", normalized)
         self.assertIn("never silently reduce the guest count", normalized)
         self.assertIn("make every policy rejection visible", normalized)

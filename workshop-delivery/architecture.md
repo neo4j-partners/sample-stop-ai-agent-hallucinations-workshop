@@ -86,8 +86,8 @@ billable infrastructure. Lab 6 is optional.
  |         production HybridCypherRetriever imported rather than rebuilt                |
  |    2.3  Text2CypherRetriever, optional. Nothing later depends on it.                 |
  |                                                                                      |
- |    2.2 closes on abstention. The availability hero question has no answer in         |
- |    the graph, so the correct behavior is to decline.                                 |
+ |    2.2 closes on abstention. Retrieval finds the hotel, but the returned             |
+ |    evidence has no live availability field, so the correct behavior is to decline.  |
  |                                                                                      |
  |    The survivor is workshop.hybrid_retrieval.search_hotel_knowledge:                 |
  |      HybridCypherRetriever over both indexes                                         |
@@ -576,7 +576,9 @@ evidence, in `internal/new-content-plan.md`.
 - **Live behavior of Lab 5.** Runtime `HotelBookingAgent-i6Jg838kmO` deployed,
   all four smoke questions passed, and teardown removed all 17 resources,
   verified independently by the Resource Groups Tagging API returning empty for
-  both owner tags.
+  both owner tags. The public-safe evidence and the gaps the next run must close
+  are recorded in
+  [`validation/agentcore-live-run-2026-08-13.md`](validation/agentcore-live-run-2026-08-13.md).
 - **`5.3_agentcore_walkthrough.ipynb` reading `AGENT_RUNTIME_ARN`.** It passed
   all six cells against the live Runtime ARN.
 - **Whether the deployed Lambda imports the shared package cleanly.** It does.

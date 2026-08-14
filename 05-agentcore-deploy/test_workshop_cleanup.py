@@ -113,9 +113,23 @@ def _repo_root() -> Path:
 
 def _tracked(root: Path, pattern: str) -> list[str]:
     output = subprocess.check_output(
-        ["git", "-C", str(root), "ls-files", pattern], text=True
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            pattern,
+        ],
+        text=True,
     )
-    return [line for line in output.splitlines() if line]
+    return [
+        line
+        for line in output.splitlines()
+        if line and (root / line).is_file()
+    ]
 
 
 def _tracked_sources(root: Path) -> Iterator[tuple[str, str]]:

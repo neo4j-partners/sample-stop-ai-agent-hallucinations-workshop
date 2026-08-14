@@ -19,7 +19,7 @@ Neo4j owns the connected data, and AWS owns reasoning and hosting. That split is
 | 0 | Setup | An Aura instance, Bedrock model access, and one repo-root `.env` |
 | 1 | [Graph build](../01-graph-build/) | The hotel knowledge graph, extracted live by Bedrock against a pinned schema, with vector and full-text indexes |
 | 2 | [Retrieval](../02-retrieval/) | Four retrievers over that graph, closing on a question the graph cannot answer |
-| 3 | [Agents and tools](../03-agents-and-tools/) | Strands agents, tools, hooks, and swarms, ending with `hotel_agent` calling the Lab 2 retriever |
+| 3 | [Agents and tools](../03-agents-and-tools/) | Strands agents, model providers, tools, and lifecycle hooks, ending with `hotel_agent` calling the Lab 2 retriever |
 | 4 | [The grounded write](../04-grounded-write/) | An idempotent reservation write, with a rule read from the graph rejecting a request the prompt alone would allow |
 | 5 | [Deploy to AgentCore](../05-agentcore-deploy/) | The same agent on AgentCore Runtime with the retriever unchanged, then torn down |
 | 6 | [Neo4j agent memory](../06-memory/) | Optional. Graph-native memory with provenance and actor isolation |

@@ -46,7 +46,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 
 Only Lab 6 is optional. `2.3_text2cypher.ipynb` and `5.3_agentcore_walkthrough.ipynb` are optional notebooks inside required labs.
 
-> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass both gates: the offline one, where each live cell self-skips without credentials, and a full run against real AWS resources, which deployed the agent to AgentCore Runtime, passed four smoke questions, and then tore everything down to nothing. The run record for that deploy is kept with the facilitator notes and is not part of this repository.
+> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass both gates: the offline one, where each live cell self-skips without credentials, and a full run against real AWS resources, which deployed the agent to AgentCore Runtime, passed four smoke questions, and then tore everything down to nothing. The sanitized [live-run record](workshop-delivery/validation/agentcore-live-run-2026-08-13.md) captures the reproducible evidence and its remaining gaps.
 
 ## Why this order
 
@@ -69,23 +69,23 @@ The workshop is anchored by two questions asked against the same graph:
 - *"What amenities and guest rating does AnyCompany Cairo Nile View have?"* returns connected, grounded evidence.
 - *"Does AnyCompany Cairo Nile View guarantee room availability next weekend?"* makes the agent abstain, because the graph holds no live availability. The abstention is the point: the agent answers only from evidence.
 
-Both appear first in Lab 2, again inside an agent in Lab 3, and again against the deployed Runtime in Lab 5.
+Both appear first in Lab 2 and again against the deployed Runtime in Lab 5. Lab 3 reuses only the amenities-and-rating question inside `hotel_agent`, then closes with the agent blocking a 15-guest booking.
 
 ## Graph-RAG vs standard RAG
 
 | Approach | Hallucination risk | Retrieval method | Best for |
 |---|---|---|---|
-| Standard RAG (vector) | High. Returns similar content even when irrelevant | Cosine similarity | General Q&A |
-| Graph-RAG (Neo4j) | 73% lower per RAG-KG-IL, arXiv 2503.13514; grounded in entity relationships | Graph traversal plus Cypher | Structured domains such as hotels, products, and finance |
+| Standard RAG (vector) | Similarity can surface relevant text without proving that it supports the requested fact | Cosine similarity | Candidate discovery over unstructured content |
+| Graph-RAG (Neo4j) | [RAG-KG-IL reports a 73% reduction](https://arxiv.org/abs/2503.13514) in its own evaluated setting. This workshop has not reproduced that measurement | Candidate retrieval plus a reviewed Cypher traversal | Domains where stable entities and explicit relationships improve the evidence contract |
 
-> **Key insight:** Vector search always returns *something similar*, even when the answer does not exist in the database, which causes fabrication. Graph-RAG returns only what is explicitly connected in the knowledge graph.
+> **Key insight:** Vector search ranks candidates by similarity, so a relevant result can still lack the requested fact. Traversal turns matched content into stable, connected fields. It does not prove that the graph is complete, current, or able to answer the question, so the agent must still check its evidence and abstain when support is missing.
 
 **What comes back for "amenities at AnyCompany Cairo Nile View?"**
 
 | Approach | What the agent gets back |
 |---|---|
-| Vector search alone | "Here are text chunks mentioning pool, gym, and free breakfast." |
-| Graph-RAG (Neo4j) | "Here are amenity chunks for AnyCompany Cairo Nile View, with its stable `hotel_id`, guest rating 4.5, connected to its amenities and cancellation policy, or nothing if the graph has no such hotel." |
+| Vector search alone | The matched hotel document as prose, including mentions of its rating and amenities |
+| Graph-RAG (Neo4j) | The matched chunk evidence plus a stable `hotel_id`, numeric `guest_rating`, and connected amenities as named fields. Facts absent from the graph remain unsupported |
 
 Lab 2 runs both against the same graph so the difference is watched rather than described. The mechanism in one sentence: vector search finds candidates, traversal finds what is connected.
 

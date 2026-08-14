@@ -18,6 +18,18 @@ uv run setup/run_notebooks.py --labs 1-4      # A range
 uv run setup/run_notebooks.py --list          # Show the notebook registry
 ```
 
+The runner executes every selected cell, but its default environment blocks
+the accumulating reservation writes in Lab 4 and memory writes in Lab 6. Their
+cells report an explicit skip and the notebooks still count as passed. To run
+those live-write scenarios during an intentional integration test, opt in:
+
+```bash
+uv run setup/run_notebooks.py --allow-writes
+```
+
+Opening either notebook directly does not set the runner marker, so participant
+execution keeps the normal write behavior.
+
 The runner is a PEP 723 script. `uv` creates and caches its shared environment,
 including `nbconvert` and all notebook dependencies, on the first run. No
 top-level virtual environment or separate installation step is required.
@@ -35,10 +47,11 @@ by Git.
 
 ### AWS side effects
 
-The default command runs every lab except Lab 5. Lab 5's three notebooks change
-AWS resources, so the two that deploy and the one that deletes each require
-their own flag. Lab 0 is a credential checklist in a README and has no notebook,
-so it never appears in a run.
+The default command runs every lab except Lab 5, with the Lab 4 and Lab 6 write
+protection described above. Lab 5's three notebooks change AWS resources, so
+the two that deploy and the one that deletes each require their own flag. Lab 0
+is a credential checklist in a README and has no notebook, so it never appears
+in a run.
 
 ```bash
 # Deploy or update the AgentCore resources: 5.1 and 5.3

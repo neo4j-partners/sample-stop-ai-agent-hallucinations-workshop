@@ -30,6 +30,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  inventory:
+    name: Workshop inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Check lab and notebook inventories
+        run: uv run setup/check_workshop_inventory.py
+
   notebooks:
     name: Notebook registry, no credentials
     runs-on: ubuntu-latest

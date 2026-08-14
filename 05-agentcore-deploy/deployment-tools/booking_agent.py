@@ -58,6 +58,8 @@ You have exactly two logical tools:
 
 Rules:
 - Use search_hotel_knowledge before creating any reservation request.
+- Treat the tool's grounding_result as binding. When answerable is false,
+  explain the missing fact and do not infer an answer from related evidence.
 - Pass only a stable hotel ID returned by that search to the command.
 - Use the caller-provided request ID exactly. Never invent or alter one.
 - Never silently reduce the guest count or change dates. Make every policy
@@ -149,6 +151,90 @@ class CommandResultRecorder(HookProvider):
         self.last_result = _command_verdict(event.result)
 
 
+def _grounding_result(
+    query: str,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Describe whether bounded hotel evidence can answer the question."""
+    normalized_query = query.casefold()
+    asks_for_live_availability = any(
+        term in normalized_query
+        for term in (
+            "availability",
+            "available",
+            "vacancy",
+            "vacancies",
+            "inventory",
+        )
+    )
+    evidence_ids = list(
+        dict.fromkeys(
+            item["hotel_id"]
+            for item in evidence
+            if isinstance(item.get("hotel_id"), str) and item["hotel_id"]
+        )
+    )
+    supported_facts = [
+        fact
+        for fact, field in (
+            ("hotel_identity", "hotel_id"),
+            ("hotel_address", "address"),
+            ("guest_rating", "guest_rating"),
+            ("amenities", "amenities"),
+        )
+        if any(item.get(field) not in (None, "", []) for item in evidence)
+    ]
+
+    if asks_for_live_availability:
+        answerable = False
+        missing_fact = "live_room_availability"
+    else:
+        answerable = bool(evidence)
+        missing_fact = None if answerable else "matching_hotel_evidence"
+
+    return {
+        "answerable": answerable,
+        "supported_facts": supported_facts,
+        "missing_fact": missing_fact,
+        "evidence_ids": evidence_ids,
+    }
+
+
+def _grounding_verdict(result: Any) -> dict[str, Any] | None:
+    """Read the structured grounding verdict from a retrieval tool result."""
+    blocks = result.get("content") or [] if isinstance(result, dict) else []
+    for block in blocks:
+        text = block.get("text") if isinstance(block, dict) else None
+        if not isinstance(text, str):
+            continue
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            continue
+        verdict = (
+            payload.get("grounding_result") if isinstance(payload, dict) else None
+        )
+        if isinstance(verdict, dict) and isinstance(verdict.get("answerable"), bool):
+            return verdict
+    return None
+
+
+class GroundingResultRecorder(HookProvider):
+    """Keep the retrieval verdict so callers can assert on it directly."""
+
+    def __init__(self) -> None:
+        self.last_result: dict[str, Any] | None = None
+
+    def register_hooks(self, registry: HookRegistry) -> None:
+        registry.add_callback(AfterToolCallEvent, self._record)
+
+    def _record(self, event: AfterToolCallEvent) -> None:
+        tool_use = event.tool_use or {}
+        if tool_use.get("name") != "search_hotel_knowledge":
+            return
+        self.last_result = _grounding_verdict(event.result)
+
+
 @tool
 def search_hotel_knowledge(query: str) -> str:
     """Search bounded hotel evidence and graph-enriched facts.
@@ -161,9 +247,17 @@ def search_hotel_knowledge(query: str) -> str:
         query: Natural-language hotel question.
 
     Returns:
-        JSON containing at most five grounded hotel evidence records.
+        JSON containing the unchanged bounded evidence records and a structured
+        answerability verdict.
     """
-    return json.dumps(_search_hotel_knowledge(query), ensure_ascii=False)
+    evidence = _search_hotel_knowledge(query)
+    return json.dumps(
+        {
+            "evidence": evidence,
+            "grounding_result": _grounding_result(query, evidence),
+        },
+        ensure_ascii=False,
+    )
 
 
 def _runtime_region() -> str:
@@ -250,10 +344,9 @@ def invoke(
     ``request_id`` is optional for retrieval-only questions and required by the
     Gateway command schema when the agent creates a reservation request.
 
-    The returned ``command_result`` is the reservation command's own response,
-    or ``None`` when the command was never called. It is what lets a caller
-    assert on the verdict the graph produced rather than on the model's account
-    of it.
+    The returned ``grounding_result`` and ``command_result`` are the tools' own
+    structured verdicts. They let a caller assert on evidence and graph behavior
+    rather than on the model's prose.
     """
     del context
     prompt, request_id = _prompt(payload)
@@ -263,7 +356,8 @@ def invoke(
     gateway_client = MCPClient(
         lambda: streamablehttp_client(_gateway_url()),
     )
-    recorder = CommandResultRecorder()
+    command_recorder = CommandResultRecorder()
+    grounding_recorder = GroundingResultRecorder()
     try:
         with gateway_client:
             command_tools = _validated_command_tools(gateway_client)
@@ -281,7 +375,11 @@ def invoke(
                 model=model,
                 tools=[search_hotel_knowledge, *command_tools],
                 system_prompt=SYSTEM_PROMPT,
-                hooks=[ReservationRequestGuard(request_id), recorder],
+                hooks=[
+                    ReservationRequestGuard(request_id),
+                    grounding_recorder,
+                    command_recorder,
+                ],
             )
             caller_context = (
                 f"\n\nCaller request ID: {request_id}"
@@ -298,7 +396,8 @@ def invoke(
         raise
 
     tools_used = _tools_used(result)
-    command_result = recorder.last_result
+    grounding_result = grounding_recorder.last_result
+    command_result = command_recorder.last_result
     LOGGER.info(
         "runtime_invocation_completed request_id=%s tools_used=%s command_status=%s",
         correlation_id,
@@ -309,6 +408,7 @@ def invoke(
         "response": str(result),
         "request_id": request_id,
         "tools_used": tools_used,
+        "grounding_result": grounding_result,
         "command_result": command_result,
     }
 

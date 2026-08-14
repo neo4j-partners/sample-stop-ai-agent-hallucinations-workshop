@@ -5,7 +5,7 @@ description = "Modules shared by more than one lab of the Neo4j/AWS agent-ground
 requires-python = ">=3.12"
 license = { text = "MIT-0" }
 
-# The union of what the nine modules import. A lab installs this package and
+# The union of what the ten modules import. A lab installs this package and
 # then adds only what that lab alone needs, such as strands-agents in Lab 3 or
 # neo4j-agent-memory in Lab 6.
 #

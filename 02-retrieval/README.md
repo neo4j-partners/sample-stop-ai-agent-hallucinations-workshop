@@ -24,7 +24,7 @@ Four retrievers run against the graph Lab 1 built. The two required notebooks ea
 | Notebook | The pair | What it proves |
 |---|---|---|
 | [`2.1_vector_retrievers.ipynb`](2.1_vector_retrievers.ipynb) | `VectorRetriever` against `VectorCypherRetriever` | The same vector search, with and without a traversal, returns the same text and different context |
-| [`2.2_fulltext_retrievers.ipynb`](2.2_fulltext_retrievers.ipynb) | `VectorRetriever` against `HybridRetriever`, then `HybridCypherRetriever` | Full-text matching holds an exact identifier a vector arm blurs, and the traversal supplies the facts neither arm carries. Closes on abstention |
+| [`2.2_fulltext_retrievers.ipynb`](2.2_fulltext_retrievers.ipynb) | `VectorRetriever` against `HybridRetriever`, then `HybridCypherRetriever` | Full-text matching holds an exact identifier a vector arm blurs, and the traversal returns matched hotel facts as stable, named fields. Closes on abstention |
 | [`2.3_text2cypher.ipynb`](2.3_text2cypher.ipynb) | Optional. `Text2CypherRetriever` alone | Neo4j computes a count over the whole matching set, which top-k retrieval cannot do |
 
 Run `2.1` then `2.2`. `2.3` is optional and can be skipped for time; nothing later in the workshop depends on it.
@@ -138,7 +138,7 @@ The runner is a PEP 723 script, so `uv` manages its own cached environment and t
 
 ## Troubleshooting
 
-**A retriever returns nothing.** Confirm which question. An empty result on the availability question at the end of `2.2` is the designed outcome, not a fault. An empty result on the hero question, the `60611` question, or `2.3`'s swimming-pool count means the graph is missing or was built from a different corpus. The verification cell at the top of the notebook names the absent fixture, in the form `Windward Mile Tower hotel at postal code 60611: found 0, expected at least 1`. Re-run Lab 1 and let it finish.
+**A retriever returns nothing.** An empty result for the hero question, the availability question, the `60611` question, or `2.3`'s swimming-pool count means the graph is missing or was built from a different corpus. The availability case is unanswerable because the returned hotel evidence has no live availability field, not because the result list should be empty. The verification cell at the top of the notebook names an absent fixture in the form `Windward Mile Tower hotel at postal code 60611: found 0, expected at least 1`. Re-run Lab 1 and let it finish.
 
 **A missing or offline index.** `verify_retrieval_indexes` raises `Retrieval index check failed:` followed by one line per problem, such as `missing index 'hotel_chunk_embeddings'` or an index in a state other than `'ONLINE'`. Lab 2 never creates indexes. Lab 1 creates both, idempotently, and waits for them to come online. Re-run it.
 
@@ -153,4 +153,4 @@ The runner is a PEP 723 script, so `uv` manages its own cached environment and t
 ## Navigation
 
 - **Previous:** [Lab 1: The graph build](../01-graph-build/), which built the graph, both indexes, and the fixtures these notebooks read.
-- **Next:** [Lab 3: Agents and tools](../03-agents-and-tools/), which gives `search_hotel_knowledge` unchanged to the `hotel_agent` that calls it, then covers the lifecycle hooks and swarms the rest of the workshop uses.
+- **Next:** [Lab 3: Agents and tools](../03-agents-and-tools/), which covers agents, model providers, tools, and lifecycle hooks, then gives `search_hotel_knowledge` unchanged to the assembled `hotel_agent`.

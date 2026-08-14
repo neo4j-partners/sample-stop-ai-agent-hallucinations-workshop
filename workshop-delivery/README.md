@@ -43,8 +43,8 @@ Lab 6 is optional but not standalone. It requires the hero `Hotel` that Lab 1 cr
 Everything else is scaffolding around these.
 
 1. **Lab 1: the graph is built live, not shipped.** Only the raw corpus `01-graph-build/hotel-faqs.zip` is in git. Every participant generates the graph, which is what makes the Bedrock-plus-Neo4j call path concrete rather than described.
-2. **Lab 2, hero question one:** *"What amenities and guest rating does AnyCompany Cairo Nile View have?"* It arrives in `2.2` and it makes every arm earn its place. The exact hotel name is what the full-text arm is for, the paraphrased wording is what the vector arm is for, and the rating and the amenity list are in neither matched chunk. The traversal is what produces them. The `2.1` pair sets this up on a different question: both retrievers find the same chunks, and only the one with the traversal returns the rating as a named field and the amenities as a list.
-3. **Lab 2, hero question two:** *"Does AnyCompany Cairo Nile View guarantee room availability next weekend?"* The agent abstains, because the graph holds no live availability. The abstention is the point of the lab. Both hero questions return in Lab 3 inside an agent and again in Lab 5 against the deployed Runtime.
+2. **Lab 2, hero question one:** *"What amenities and guest rating does AnyCompany Cairo Nile View have?"* It appears in both `2.1` and `2.2`, where every arm earns its place. The exact hotel name is what the full-text arm is for, and the paraphrased wording is what the vector arm is for. The matched hotel document already contains the rating and amenities as prose. Traversal returns those facts as stable, connected fields: a numeric rating and a list of amenities.
+3. **Lab 2, hero question two:** *"Does AnyCompany Cairo Nile View guarantee room availability next weekend?"* Retrieval finds the hotel, but the returned evidence contains no live availability fact. The agent abstains instead of treating a related policy phrase as proof. Lab 3 reuses only the amenities-and-rating question inside `hotel_agent`, then closes with a 15-guest booking. Lab 5 asks both hero questions again against the deployed Runtime.
 4. **Lab 4: the rule moves out of the prompt.** Lab 3 blocks a 15-guest booking with `MaxGuestsHook`, where `10` is a Python literal in one notebook next to one agent. Lab 4 reads the same limit from a `Rule` node inside the write transaction and rejects the same request with nothing written.
 
 ## Cutting for time
@@ -61,7 +61,12 @@ Everything else is scaffolding around these.
 
 **Never cut Lab 5's teardown.** `5.2_teardown.ipynb` is a numbered notebook in the lab for that reason. If Lab 5 ran, teardown runs.
 
-A rehearsed per-lab time budget is still outstanding. The two wall-clock numbers that are measured: Lab 1's lite build takes roughly 15 minutes, and the AgentCore Runtime launch in `5.1` takes three to five minutes.
+A rehearsed per-lab time budget is still outstanding. Use the provisional
+schedule and measurement sheet in [`rehearsal.md`](rehearsal.md) to record the
+facilitated run without confusing target times with measured evidence. The two
+wall-clock numbers that are already measured: Lab 1's lite build takes roughly
+15 minutes, and the AgentCore Runtime launch in `5.1` takes three to five
+minutes.
 
 ## Suggested track shapes
 

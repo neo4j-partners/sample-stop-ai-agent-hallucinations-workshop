@@ -88,7 +88,7 @@ Export it before `setup/provision_agentcore.py provision`, before opening `5.1_a
 
 ## Notebooks
 
-> **Build status:** all three notebooks are in place and pass with credentials absent, where every live cell skips. The live deploy, the four smoke tests, and the teardown against real AWS resources were run for real, and the record is kept with the facilitator notes rather than in this repository.
+> **Build status:** all three notebooks are in place and pass with credentials absent, where every live cell skips. The live deploy, the four smoke tests, and the teardown against real AWS resources were run for real. The sanitized [live-run record](../workshop-delivery/validation/agentcore-live-run-2026-08-13.md) captures the result, package versions, teardown inventory, and evidence gaps.
 
 | Notebook | Status | What it does |
 |---|---|---|
@@ -96,7 +96,7 @@ Export it before `setup/provision_agentcore.py provision`, before opening `5.1_a
 | `5.2_teardown.ipynb` | **In place** | Dry run, review, delete, then verify by listing rather than by trusting the success message |
 | `5.3_agentcore_walkthrough.ipynb` | Optional. **In place** | Invokes the deployed Runtime and correlates AgentCore and CloudWatch logs by `request_id` |
 
-`5.3` is optional and depends on `5.1`. It reads `AGENT_RUNTIME_ARN`, the value `5.1` produces at launch. Provisioning does not write that key, because provisioning does not know the ARN: only a launch produces one. `5.1` writes it into the repository-root `.env` itself, with the same in-place upsert `setup/provision_agentcore.py` uses for its three keys, so `5.3` finds it in a fresh kernel with nothing to copy by hand. It also prints the `export` line if you would rather set it in a shell. If neither has happened, every live cell in `5.3` skips.
+`5.3` is optional and depends on `5.1`. It reads `AGENT_RUNTIME_ARN`, the value `5.1` produces at launch. Provisioning does not write that key, because provisioning does not know the ARN: only a launch produces one. `5.1` and the provisioner use the same atomic shared `.env` helper, which removes duplicate managed keys before writing one canonical value. This lets `5.3` find the ARN in a fresh kernel with nothing to copy by hand. It also prints the `export` line if you would rather set it in a shell. If neither has happened, every live cell in `5.3` skips.
 
 The order to run them is `5.1`, then `5.3` if you want it, then `5.2` last. The table above is numbered, not sequenced: `5.2` deletes the Runtime that `5.3` invokes, so teardown goes at the end whether or not you take the optional walkthrough. Start here, from this directory:
 
@@ -110,9 +110,9 @@ code 5.1_agentcore_deploy.ipynb
 
 ### The two reference sources being retargeted
 
-`deploy_agentcore.ipynb` is present in this folder as the **source material for authoring `5.1`**, not as a participant path, and it opens with a banner saying so. It targets the earlier module layout: DynamoDB hotel, booking, and steering-rule tables, its own IAM roles, seven booking-lifecycle Lambdas, and its own Gateway creation. Two parts of it carry over unchanged: step 8, which calls `Runtime.configure` and `Runtime.launch` from `bedrock_agentcore_starter_toolkit`, and the tagging cell that follows it.
+[`workshop-delivery/archive/deploy_agentcore.ipynb`](../workshop-delivery/archive/deploy_agentcore.ipynb) is the **source material used to author `5.1`**, not a participant path. It now lives outside the lab sequence and opens with a banner saying so. It targets the earlier module layout: DynamoDB hotel, booking, and steering-rule tables, its own IAM roles, seven booking-lifecycle Lambdas, and its own Gateway creation. Two parts of it carried over unchanged: step 8, which calls `Runtime.configure` and `Runtime.launch` from `bedrock_agentcore_starter_toolkit`, and the tagging cell that follows it.
 
-**Do not run it.** It references a `query_knowledge_graph` Lambda that no longer exists, so it fails partway through with billable resources already created, and it points at an `08-cleanup/` folder that is gone. Nothing it creates carries the `WorkshopResource` tag, so `5.2_teardown.ipynb` will not clean up after it.
+**Do not run it.** It references a `query_knowledge_graph` Lambda that no longer exists, so it fails partway through with billable resources already created, and it points at an `08-cleanup/` folder that is gone. Its resources use the current workshop tag, and `5.2_teardown.ipynb` retains discovery for tagged legacy targets. A partial failure can still require investigation, so inspect the teardown dry run and verify zero remaining selected resources.
 
 `advanced-deployment/02_agentcore_walkthrough.ipynb` is the source material for `5.3`. See [`advanced-deployment/README.md`](advanced-deployment/README.md).
 
@@ -283,7 +283,7 @@ Each is addressed by exact name or by ARN. Nothing is enumerated and nothing is 
 
 The caller creates a canonical UUID and passes it as `request_id` alongside the prompt. The Runtime passes that exact value to the Gateway command. `ReservationRequestGuard`, a Strands `BeforeToolCallEvent` hook in `booking_agent.py`, cancels the tool call with a `BLOCKED:` message if the model omits the request ID or substitutes one of its own. The same ID appears in Runtime logs, Lambda logs, AgentCore traces, and on the stored `ReservationRequest` node in Neo4j, so one CloudWatch Logs Insights search on `request_id=` recovers the whole path.
 
-Every invocation returns four keys, and the fourth is the one worth reading. `response` is the model's prose, `tools_used` lists the tools it attempted, `request_id` echoes what the caller sent, and `command_result` is the reservation command's own response: the `status`, `reason_code`, and `duplicate` that `workshop.reservation_command` computed inside the Lambda after reading the rule out of the graph. A second Strands hook, `CommandResultRecorder`, carries it out of the container on `AfterToolCallEvent`. It matters because `tools_used` records an attempt: a call the guard cancelled, a Lambda that failed on auth, and a Gateway 5xx all put the command's name in that list and all leave the graph empty, which is exactly what a genuine rule rejection also looks like. `command_result` is what tells them apart, and it is `null` when the command was never reached, which is why `5.1`'s third smoke test asserts on its `reason_code`.
+Every invocation returns five keys. `response` is the model's prose, `tools_used` lists the tools it attempted, and `request_id` echoes what the caller sent. The other two are structured tool verdicts. `grounding_result` reports whether the retrieved evidence can answer the question, the supported and missing facts, and the evidence IDs. `command_result` is the reservation command's own response: the `status`, `reason_code`, and `duplicate` that `workshop.reservation_command` computed inside the Lambda after reading the rule out of the graph. `GroundingResultRecorder` and `CommandResultRecorder` carry those verdicts out of the container on `AfterToolCallEvent`. Read them before the prose. They matter because `tools_used` records only an attempt. A call the guard cancelled, a Lambda that failed on auth, and a Gateway 5xx all put the command's name in that list and all leave the graph empty, which is exactly what a genuine rule rejection also looks like. `command_result` tells them apart, and it is `null` when the command was never reached, which is why `5.1`'s third smoke test asserts on its `reason_code`. `grounding_result` is `null` when retrieval was never reached, and `5.1`'s availability smoke test asserts that it reports `answerable=false` with `missing_fact=live_room_availability`.
 
 Logs record the request ID and never prompts, credentials, secret payloads, or connection strings.
 
@@ -371,7 +371,6 @@ uv run --with pytest --with-requirements requirements.txt -m pytest
 ├── 5.1_agentcore_deploy.ipynb      # Build the wheel, launch the Runtime, tag it, four smoke tests
 ├── 5.2_teardown.ipynb              # Tag-scoped teardown, dry run first
 ├── 5.3_agentcore_walkthrough.ipynb # Optional: one request correlated end to end
-├── deploy_agentcore.ipynb          # Superseded, banner says so. Reference source for authoring 5.1, never run
 ├── workshop_cleanup.py             # The one teardown implementation
 ├── test_workshop_cleanup.py        # 20 tests, fakes injected, no AWS needed
 ├── CLEANUP.md                      # Long-form teardown reasoning and incident history

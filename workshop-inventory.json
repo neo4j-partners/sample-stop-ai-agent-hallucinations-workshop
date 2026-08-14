@@ -1,0 +1,104 @@
+{
+  "documentation_targets": [
+    {
+      "file": "README.md",
+      "all_notebooks": true,
+      "all_hero_questions": true
+    },
+    {
+      "file": "workshop-delivery/README.md",
+      "all_notebooks": true,
+      "all_hero_questions": true
+    },
+    {
+      "file": "workshop-delivery/architecture.md",
+      "all_notebooks": true,
+      "all_hero_questions": false
+    }
+  ],
+  "labs": [
+    {
+      "number": "0",
+      "folder": "00-setup",
+      "title": "Setup",
+      "optional": false,
+      "notebooks": [],
+      "topics": ["credentials", "Neo4j Aura", "Amazon Bedrock model access"]
+    },
+    {
+      "number": "1",
+      "folder": "01-graph-build",
+      "title": "Graph build",
+      "optional": false,
+      "notebooks": [
+        {"file": "1.1_build_graph.ipynb", "optional": false}
+      ],
+      "topics": ["knowledge graph extraction", "pinned schema", "retrieval indexes"]
+    },
+    {
+      "number": "2",
+      "folder": "02-retrieval",
+      "title": "Retrieval",
+      "optional": false,
+      "notebooks": [
+        {"file": "2.1_vector_retrievers.ipynb", "optional": false},
+        {"file": "2.2_fulltext_retrievers.ipynb", "optional": false},
+        {"file": "2.3_text2cypher.ipynb", "optional": true}
+      ],
+      "topics": ["vector retrieval", "hybrid retrieval", "graph traversal", "answerability"],
+      "hero_questions": [
+        "What amenities and guest rating does AnyCompany Cairo Nile View have?",
+        "Does AnyCompany Cairo Nile View guarantee room availability next weekend?"
+      ]
+    },
+    {
+      "number": "3",
+      "folder": "03-agents-and-tools",
+      "title": "Agents and tools",
+      "optional": false,
+      "notebooks": [
+        {"file": "3.1_strands_primer.ipynb", "optional": false}
+      ],
+      "topics": ["Strands agents", "tools", "lifecycle hooks"],
+      "hero_questions": [
+        "What amenities and guest rating does AnyCompany Cairo Nile View have?"
+      ]
+    },
+    {
+      "number": "4",
+      "folder": "04-grounded-write",
+      "title": "The grounded write",
+      "optional": false,
+      "notebooks": [
+        {"file": "4.1_reservation_write.ipynb", "optional": false}
+      ],
+      "topics": ["graph-resident rules", "idempotent writes", "structured command results"]
+    },
+    {
+      "number": "5",
+      "folder": "05-agentcore-deploy",
+      "title": "Deploy to AgentCore",
+      "optional": false,
+      "notebooks": [
+        {"file": "5.1_agentcore_deploy.ipynb", "optional": false},
+        {"file": "5.3_agentcore_walkthrough.ipynb", "optional": true},
+        {"file": "5.2_teardown.ipynb", "optional": false}
+      ],
+      "topics": ["AgentCore Runtime", "AgentCore Gateway", "behavioral smoke tests", "teardown"],
+      "hero_questions": [
+        "What amenities and guest rating does AnyCompany Cairo Nile View have?",
+        "Does AnyCompany Cairo Nile View guarantee room availability next weekend?"
+      ]
+    },
+    {
+      "number": "6",
+      "folder": "06-memory",
+      "title": "Neo4j agent memory",
+      "optional": true,
+      "notebooks": [
+        {"file": "6.1_neo4j_agent_memory.ipynb", "optional": false}
+      ],
+      "topics": ["graph-native memory", "provenance", "actor isolation"]
+    }
+  ]
+}

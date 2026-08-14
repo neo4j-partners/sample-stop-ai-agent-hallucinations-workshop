@@ -10,7 +10,7 @@
 #     # neo4j-graphrag, and python-dotenv are deliberately absent: `workshop`
 #     # declares all four, and restating them here is how the runner's pins
 #     # drift out of step with the package's.
-#     "strands-agents>=1.27.0",
+#     "strands-agents>=1.27.0,<2.0.0",
 #     "numpy>=1.24.0",
 #     "pyyaml>=6.0",
 #     "bedrock-agentcore-starter-toolkit",
@@ -37,6 +37,7 @@ Usage:
     uv run setup/run_notebooks.py --labs 6
     uv run setup/run_notebooks.py --labs 5 --include-deploy
     uv run setup/run_notebooks.py --labs 5 --include-cleanup
+    uv run setup/run_notebooks.py --allow-writes
     uv run setup/run_notebooks.py --keep-output
 """
 
@@ -59,6 +60,7 @@ from typing import Any, Iterator
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_ROOT = REPO_ROOT / "setup" / "notebook-output"
 KERNEL_NAME = "hallucinations-workshop"
+RUNNER_MARKER = "WORKSHOP_RUNNER"
 
 _INSTALL_MAGIC = re.compile(r"^(\s*)[%!]\s*(pip|pip3|conda|uv)\b")
 
@@ -232,6 +234,24 @@ def temporary_kernel(work_dir: Path) -> Iterator[None]:
             os.environ.pop("JUPYTER_PATH", None)
         else:
             os.environ["JUPYTER_PATH"] = previous_path
+
+
+@contextmanager
+def runner_environment(allow_writes: bool) -> Iterator[None]:
+    """Mark runner kernels as write-safe unless writes were explicitly allowed."""
+    previous_marker = os.environ.get(RUNNER_MARKER)
+    if allow_writes:
+        os.environ.pop(RUNNER_MARKER, None)
+    else:
+        os.environ[RUNNER_MARKER] = "1"
+
+    try:
+        yield
+    finally:
+        if previous_marker is None:
+            os.environ.pop(RUNNER_MARKER, None)
+        else:
+            os.environ[RUNNER_MARKER] = previous_marker
 
 
 def output_path(output_dir: Path, notebook: Notebook) -> Path:
@@ -446,6 +466,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep executed notebooks under setup/notebook-output/.",
     )
     parser.add_argument(
+        "--allow-writes",
+        action="store_true",
+        help=(
+            "Allow Lab 4 reservation and Lab 6 memory writes. By default, "
+            "their write scenarios execute as explicit skips."
+        ),
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="List registered notebooks and exit.",
@@ -487,18 +515,19 @@ def main() -> int:
             result_dir = work_dir / "output"
 
         results = []
-        with temporary_kernel(work_dir):
-            for notebook, skip_reason in plan:
-                if skip_reason is not None:
-                    path = notebook.path.relative_to(REPO_ROOT)
-                    print(f"\nSkipping {path}: {skip_reason}")
+        with runner_environment(args.allow_writes):
+            with temporary_kernel(work_dir):
+                for notebook, skip_reason in plan:
+                    if skip_reason is not None:
+                        path = notebook.path.relative_to(REPO_ROOT)
+                        print(f"\nSkipping {path}: {skip_reason}")
+                        results.append(
+                            Result(notebook, "SKIP", reason=skip_reason)
+                        )
+                        continue
                     results.append(
-                        Result(notebook, "SKIP", reason=skip_reason)
+                        run_notebook(notebook, result_dir, args.timeout)
                     )
-                    continue
-                results.append(
-                    run_notebook(notebook, result_dir, args.timeout)
-                )
 
         print_summary(results, kept_output)
         return 1 if any(result.status == "FAIL" for result in results) else 0

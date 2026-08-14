@@ -2,8 +2,13 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "boto3>=1.43.0",
+#     # boto3 is supplied by the shared package. Keeping one dependency path
+#     # makes this script consume the same package contract as the labs.
+#     "workshop",
 # ]
+#
+# [tool.uv.sources]
+# workshop = { path = "../workshop", editable = true }
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
@@ -37,9 +42,7 @@ import contextlib
 import io
 import json
 import os
-import re
 import subprocess
-import sys
 import tempfile
 import time
 import zipfile
@@ -51,6 +54,8 @@ from typing import Any
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
+from workshop import contracts
+from workshop.env_file import remove_env_keys, update_env_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_DIR = REPO_ROOT / "05-agentcore-deploy"
@@ -62,14 +67,6 @@ ENV_FILE = REPO_ROOT / ".env"
 # The Lambda wrapper imports `workshop.reservation_command`, so the packaging
 # step installs this package rather than copying named files.
 SHARED_PACKAGE = REPO_ROOT / "workshop"
-
-# Read the shared contracts from source instead of declaring `workshop` as a
-# dependency above. `workshop.contracts` and the one module it imports are pure
-# constants with no third-party imports, so this keeps the script's environment
-# at boto3 alone while still having exactly one definition of the values below.
-sys.path.insert(0, str(SHARED_PACKAGE / "src"))
-
-from workshop import contracts  # noqa: E402
 
 # `demo06` is a real provisioned identifier, not a stale label. Every resource
 # name and the owner tag key are built from it. Override it with DEMO06_PREFIX
@@ -98,9 +95,9 @@ ENV_RUNTIME_ROLE_ARN = "AGENTCORE_RUNTIME_ROLE_ARN"
 ENV_COMMAND_SECRET_ID = "NEO4J_COMMAND_SECRET_ID"
 MANAGED_ENV_KEYS = (ENV_GATEWAY_URL, ENV_RUNTIME_ROLE_ARN, ENV_COMMAND_SECRET_ID)
 ENV_HEADER = "# --- Lab 5 AgentCore deploy (written by setup/provision_agentcore.py) ---"
-# The header earlier versions wrote. `clear_env` matches both, so a teardown
-# that follows an older provision removes the old header instead of stranding
-# it in the participant's .env, and `upsert_env` does not stack a second one.
+# The header earlier versions wrote. The shared helper matches both, so a
+# teardown after an older provision removes the old header instead of
+# stranding it in the participant's .env or stacking a second one.
 ENV_HEADER_LEGACY = (
     "# --- Demo 06 AgentCore deploy (written by setup/provision_agentcore.py) ---"
 )
@@ -241,48 +238,6 @@ def resolve_config() -> Config:
             ),
         ),
     )
-
-
-def upsert_env(path: Path, values: dict[str, str]) -> None:
-    """Write or replace the managed keys in .env, preserving everything else.
-
-    A commented placeholder (``# KEY=...``) is replaced by the live value so a
-    repeated ``provision`` stays idempotent instead of appending duplicates.
-    """
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    lines = existing.splitlines()
-    remaining = dict(values)
-    patterns = {
-        key: re.compile(rf"^\s*#?\s*{re.escape(key)}\s*=") for key in values
-    }
-    for index, line in enumerate(lines):
-        for key, pattern in patterns.items():
-            if key in remaining and pattern.match(line):
-                lines[index] = f"{key}={remaining.pop(key)}"
-                break
-    if remaining:
-        if not any(header in lines for header in ENV_HEADERS):
-            if lines and lines[-1].strip():
-                lines.append("")
-            lines.append(ENV_HEADER)
-        for key, value in remaining.items():
-            lines.append(f"{key}={value}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def clear_env(path: Path, keys: tuple[str, ...]) -> None:
-    """Remove the managed keys and header so nothing stale points at AWS."""
-    if not path.exists():
-        return
-    patterns = {key: re.compile(rf"^\s*{re.escape(key)}\s*=") for key in keys}
-    kept = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip() in ENV_HEADERS:
-            continue
-        if any(pattern.match(line) for pattern in patterns.values()):
-            continue
-        kept.append(line)
-    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -936,13 +891,15 @@ def cmd_provision(clients: Clients, config: Config) -> int:
     )
 
     log("A5: config handoff to .env")
-    upsert_env(
+    update_env_file(
         ENV_FILE,
         {
             ENV_GATEWAY_URL: str(gateway["url"]),
             ENV_RUNTIME_ROLE_ARN: runtime_role_arn,
             ENV_COMMAND_SECRET_ID: secret_arn,
         },
+        header=ENV_HEADER,
+        legacy_headers=(ENV_HEADER_LEGACY,),
     )
     log(f"  wrote {', '.join(MANAGED_ENV_KEYS)} to {ENV_FILE}")
     log("Provision complete.")
@@ -1066,7 +1023,7 @@ def cmd_teardown(clients: Clients, config: Config, assume_yes: bool) -> int:
         if _error_code(error) != "ResourceNotFoundException":
             raise
 
-    clear_env(ENV_FILE, MANAGED_ENV_KEYS)
+    remove_env_keys(ENV_FILE, MANAGED_ENV_KEYS, headers=ENV_HEADERS)
     log(f"  cleared {', '.join(MANAGED_ENV_KEYS)} from {ENV_FILE}")
     log("Teardown complete.")
     return 0

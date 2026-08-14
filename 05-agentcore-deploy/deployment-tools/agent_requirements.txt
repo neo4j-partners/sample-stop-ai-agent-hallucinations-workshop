@@ -1,12 +1,12 @@
-strands-agents[otel]>=1.27.0
-bedrock-agentcore>=1.1.0
+strands-agents[otel]==1.52.0
+bedrock-agentcore==1.21.0
 # Declared rather than inherited from bedrock-agentcore. booking_agent.py
 # imports mcp.client.streamable_http directly, and it is the one import the
 # whole Gateway path depends on, so it should not arrive by accident.
-mcp>=1.9.0
+mcp==1.29.0
 aws-opentelemetry-distro>=0.7.0
-boto3>=1.35.0
-neo4j>=6.0.0,<7.0.0
+boto3==1.43.70
+neo4j==6.2.0
 neo4j-graphrag==1.18.0
 
 # The shared package `booking_agent.py` imports, built into vendor/ by
