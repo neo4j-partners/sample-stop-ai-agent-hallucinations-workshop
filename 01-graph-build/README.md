@@ -236,7 +236,7 @@ uv run prepare_graph.py --mode lite --rebuild     # discard and rebuild
 
 `prepare_graph.py` is idempotent. It checks the retrieval indexes against the embedding contract before it decides anything, creates them when they are missing, reports readiness, and skips extraction when the graph is already complete. `--rebuild` forces the extraction to run even against a graph that reports ready; the build clears the graph before it starts either way. `--check-only` writes nothing, so the two flags are mutually exclusive and passing both is an error rather than a silent choice between them. A successful build ends by seeding and verifying the Labs 4 and 5 fixtures, which is what step 7 of the notebook does.
 
-`NEO4J_DATABASE` is optional and defaults to `neo4j`. Every session `graph_builder.py` opens goes to it, and so does the fixture seed. Index creation and the fixture counts in [`workshop/src/workshop/retrieval_setup.py`](../workshop/src/workshop/retrieval_setup.py) still use the driver's home database, so pointing `NEO4J_DATABASE` at a database that is not the instance default is not yet supported end to end.
+`NEO4J_DATABASE` is optional and defaults to `neo4j`. Every session `graph_builder.py` opens goes to it, and so do the fixture seed, the index creation, and the fixture counts in [`workshop/src/workshop/retrieval_setup.py`](../workshop/src/workshop/retrieval_setup.py). Pointing `NEO4J_DATABASE` at a database that is not the instance default is supported end to end.
 
 ### Tests
 

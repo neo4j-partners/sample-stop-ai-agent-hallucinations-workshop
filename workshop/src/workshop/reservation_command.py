@@ -119,8 +119,7 @@ class Neo4jCommandConfig:
             uri=values["NEO4J_URI"] or "",
             username=values["NEO4J_USERNAME"] or "",
             password=values["NEO4J_PASSWORD"] or "",
-            database=os.environ.get("NEO4J_DATABASE")
-            or contracts.DEFAULT_NEO4J_DATABASE,
+            database=contracts.graph_database(),
         )
 
     @classmethod

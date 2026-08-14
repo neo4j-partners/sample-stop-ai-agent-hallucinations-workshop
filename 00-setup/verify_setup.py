@@ -68,17 +68,18 @@ from workshop.retrieval_contract import (  # noqa: E402
     EMBEDDING_DIMENSIONS,
     EMBEDDING_MODEL_ID,
     EMBEDDING_PURPOSE,
+    MEMORY_EMBEDDING_MODEL,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AWS_REGION = "us-east-1"
 
 # Lab 6 embeds its memory records with Titan Text Embeddings V2, a second
-# embedding contract on purpose, and it is the only lab that does. The literal
-# is defined for that lab in 06-memory/memory_helpers.py as
-# MEMORY_EMBEDDING_MODEL. Lab 0 restates it rather than importing across a lab
-# boundary, so keep the two in step if either moves.
-LAB6_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
+# embedding contract on purpose, and it is the only lab that does. Both this
+# check and Lab 6 itself read the name from the shared package, so there is one
+# definition. The width is Titan's own, and it matches EMBEDDING_DIMENSIONS by
+# coincidence rather than by contract, so it stays a separate number here.
+LAB6_EMBEDDING_MODEL_ID = MEMORY_EMBEDDING_MODEL
 LAB6_EMBEDDING_DIMENSIONS = 1024
 
 APOC_QUERY = (

@@ -15,6 +15,7 @@ from typing import Any, Iterable, Mapping, Sequence, cast
 from neo4j import Driver
 from neo4j_graphrag.indexes import create_fulltext_index, create_vector_index
 
+from workshop.contracts import graph_database
 from workshop.graph_schema import GRAPH_SCHEMA, SCHEMA_NODE_LABELS
 from workshop.retrieval_contract import (
     CHUNK_FULLTEXT_INDEX,
@@ -130,8 +131,20 @@ def missing_source_fixtures(paths: Iterable[Path]) -> list[str]:
     return sorted(set(REQUIRED_SOURCE_FILES) - selected)
 
 
+def _session(driver: Driver):
+    """Open a session against the configured database.
+
+    Indexes, counts, and fixture checks all have to land on the database the
+    build wrote to. Left on the driver's home database, a participant who sets
+    `NEO4J_DATABASE` gets data in one place and indexes in another, and every
+    later lab retrieves nothing while every call succeeds.
+    """
+    return driver.session(database=graph_database())
+
+
 def ensure_retrieval_indexes(driver: Driver) -> None:
     """Create the two chunk indexes idempotently and verify their contracts."""
+    database = graph_database()
     create_vector_index(
         driver=driver,
         name=CHUNK_VECTOR_INDEX,
@@ -140,6 +153,7 @@ def ensure_retrieval_indexes(driver: Driver) -> None:
         dimensions=EMBEDDING_DIMENSIONS,
         similarity_fn="cosine",
         fail_if_exists=False,
+        neo4j_database=database,
     )
     create_fulltext_index(
         driver=driver,
@@ -147,8 +161,9 @@ def ensure_retrieval_indexes(driver: Driver) -> None:
         label="Chunk",
         node_properties=["text"],
         fail_if_exists=False,
+        neo4j_database=database,
     )
-    with driver.session() as session:
+    with _session(driver) as session:
         session.run("CALL db.awaitIndexes($timeout_seconds)", timeout_seconds=300).consume()
     verify_retrieval_indexes(driver)
 
@@ -216,7 +231,7 @@ def _index_contract_problems(records: Iterable[Mapping[str, Any]]) -> list[str]:
 
 def verify_retrieval_indexes(driver: Driver) -> None:
     """Raise with a precise message unless both retrieval indexes are ready."""
-    with driver.session() as session:
+    with _session(driver) as session:
         records = list(
             session.run(
                 """
@@ -236,7 +251,7 @@ def verify_retrieval_indexes(driver: Driver) -> None:
 
 def graph_counts(driver: Driver) -> tuple[int, int, dict[str, int], dict[str, int]]:
     """Return document, chunk, extracted-label, and relationship counts."""
-    with driver.session() as session:
+    with _session(driver) as session:
         document_count = session.run(
             "MATCH (d:Document) RETURN count(d) AS count"
         ).single()["count"]
@@ -273,7 +288,7 @@ def graph_counts(driver: Driver) -> tuple[int, int, dict[str, int], dict[str, in
 def fixture_problems(driver: Driver) -> list[str]:
     """Return missing or under-populated required graph fixtures."""
     problems: list[str] = []
-    with driver.session() as session:
+    with _session(driver) as session:
         for fixture in REQUIRED_FIXTURES:
             record = session.run(fixture.query, **dict(fixture.parameters)).single()
             actual = 0 if record is None else record["actual"]

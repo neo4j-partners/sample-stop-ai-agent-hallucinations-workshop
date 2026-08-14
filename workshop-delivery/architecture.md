@@ -555,7 +555,7 @@ rather than as confirmed facts, because nothing in the tree settles them and
 this document was written without running a notebook, a deploy, or a Cypher
 query.
 
-- **The four-hour delivery budget.** `new-content-plan.md` Phase 11, the
+- **The four-hour delivery budget.** `internal/new-content-plan.md` Phase 11, the
   rehearsal, is the one phase still outstanding, so no participant-facing budget
   has been measured. Machine execution time has been: all seven notebooks
   outside Lab 5 run in 311 seconds against an already-built graph. That is a
@@ -571,7 +571,7 @@ query.
 ### Claims this document previously carried as unverified, now settled
 
 Phase 8 ran for real and closed four of them. Its validation record is the
-evidence, in `new-content-plan.md`.
+evidence, in `internal/new-content-plan.md`.
 
 - **Live behavior of Lab 5.** Runtime `HotelBookingAgent-i6Jg838kmO` deployed,
   all four smoke questions passed, and teardown removed all 17 resources,

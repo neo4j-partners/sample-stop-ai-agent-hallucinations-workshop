@@ -91,3 +91,6 @@ verify-worklog.md
 # Internal review + scratch harness (untracked, do not ship)
 verify-v2.md
 *-fix07-infra.ipynb
+
+# Facilitator-only rebuild record. Not participant material, not shipped.
+workshop-delivery/internal/

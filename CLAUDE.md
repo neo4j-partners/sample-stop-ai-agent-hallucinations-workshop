@@ -32,7 +32,7 @@ Read the root `README.md` for the Platform Responsibilities and Data Ownership t
 - `workshop-delivery/` holds the architecture document and delivery notes.
 - Four notebooks in the tree are source material the rebuild drew from, kept for reference and deliberately absent from the runner's registry: `02-retrieval/retrieval_patterns.ipynb`, `04-grounded-write/01_hybrid_retrieval.ipynb`, `05-agentcore-deploy/deploy_agentcore.ipynb`, and `05-agentcore-deploy/advanced-deployment/02_agentcore_walkthrough.ipynb`. Do not edit them to fix a lab; edit the `N.M_*.ipynb` notebook the lab actually ships.
 - `backups/` and `logs/` hold historical run logs and design notes. Read for context on prior decisions; treat as append-only history, not living docs.
-- `new-content-plan.md` is the twelve-phase rebuild plan, an internal record rather than participant material. Its per-phase Findings record the gotchas that were hit for real.
+- `workshop-delivery/internal/` holds the rebuild record: `new-content-plan.md`, the twelve-phase plan whose per-phase Findings record the gotchas that were hit for real, and `new-content.md`, the content brief it was written against. The directory is gitignored, so a fresh clone will not have it. It is facilitator material, never participant material, and no shipped file should link to it.
 - `.github/workflows/offline-gate.yml` is the CI gate. It runs the notebook runner with no credentials present and the four per-lab pytest suites, and it asserts each suite's count so the numbers quoted below cannot drift unnoticed.
 
 ## Commands
@@ -83,7 +83,7 @@ Tests are per-lab and run from inside that lab's directory. There is no single t
 ```bash
 cd 01-graph-build     && uv run --with pytest --with-requirements requirements.txt -m pytest   # 12 tests
 cd 04-grounded-write  && uv run --with pytest --with-requirements requirements.txt -m pytest   # 56 tests
-cd 06-memory          && uv run --with pytest --with-requirements requirements.txt -m pytest   # 27 tests
+cd 06-memory          && uv run --with pytest --with-requirements requirements.txt -m pytest   # 40 tests
 cd 05-agentcore-deploy && uv run --with pytest --with-requirements requirements.txt -m pytest  # 29 tests
 ```
 

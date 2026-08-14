@@ -424,7 +424,7 @@ def _configuration() -> tuple[str, tuple[str, str], str]:
     return (
         os.environ["NEO4J_URI"],
         (os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"]),
-        os.environ.get("NEO4J_DATABASE") or contracts.DEFAULT_NEO4J_DATABASE,
+        contracts.graph_database(),
     )
 
 

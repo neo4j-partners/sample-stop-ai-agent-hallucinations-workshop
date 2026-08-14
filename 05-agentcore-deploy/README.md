@@ -88,7 +88,7 @@ Export it before `setup/provision_agentcore.py provision`, before opening `5.1_a
 
 ## Notebooks
 
-> **Build status:** all three notebooks are in place and pass with credentials absent, where every live cell skips. The live deploy, the four smoke tests, and the teardown against real AWS resources are recorded in `new-content-plan.md` Phase 8.
+> **Build status:** all three notebooks are in place and pass with credentials absent, where every live cell skips. The live deploy, the four smoke tests, and the teardown against real AWS resources were run for real, and the record is kept with the facilitator notes rather than in this repository.
 
 | Notebook | Status | What it does |
 |---|---|---|

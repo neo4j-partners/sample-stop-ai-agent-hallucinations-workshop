@@ -88,7 +88,7 @@ jobs:
           - lab: 05-agentcore-deploy
             expected: 29
           - lab: 06-memory
-            expected: 27
+            expected: 40
     steps:
       - uses: actions/checkout@v4
 

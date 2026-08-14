@@ -82,7 +82,13 @@ from workshop.graph_setup import HERO_NAME as HERO_HOTEL_NAME
 # The memory vector indexes use Titan Text Embeddings V2, a separate embedding
 # contract from the Nova model that embeds the hotel chunks. Titan V2 produces
 # 1024-dimensional vectors.
-MEMORY_EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
+#
+# The model name has one definition, in the shared package, because Lab 0 also
+# checks Bedrock access to it before the workshop starts. It is re-exported
+# under this lab's name, the same way HERO_HOTEL_NAME is above, so the notebook
+# and the tests keep importing it from here.
+from workshop.retrieval_contract import MEMORY_EMBEDDING_MODEL  # noqa: E402
+
 MEMORY_EMBEDDING_DIMENSIONS = 1024
 
 # The library-managed vector indexes this lab exercises

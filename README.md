@@ -46,7 +46,7 @@ Built with [Strands Agents](https://strandsagents.com) and Amazon Bedrock. The s
 
 Only Lab 6 is optional. `2.3_text2cypher.ipynb` and `5.3_agentcore_walkthrough.ipynb` are optional notebooks inside required labs.
 
-> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass both gates: the offline one, where each live cell self-skips without credentials, and a full run against real AWS resources, which deployed the agent to AgentCore Runtime, passed four smoke questions, and then tore everything down to nothing. `new-content-plan.md` Phase 8 holds the evidence.
+> **Build status:** every notebook is in place. Labs 1 through 4 and Lab 6, seven notebooks, pass `uv run setup/run_notebooks.py` against a live Aura instance and Amazon Bedrock. Lab 5's three notebooks pass both gates: the offline one, where each live cell self-skips without credentials, and a full run against real AWS resources, which deployed the agent to AgentCore Runtime, passed four smoke questions, and then tore everything down to nothing. The run record for that deploy is kept with the facilitator notes and is not part of this repository.
 
 ## Why this order
 
@@ -197,7 +197,7 @@ cd 04-grounded-write
 uv run --with pytest --with-requirements requirements.txt -m pytest
 ```
 
-The suites, as they stand: 12 tests in Lab 1, 56 in Lab 4, 29 in Lab 5, and 27 in Lab 6. Of Lab 4's 56, the reservation command and its contracts account for 29, spread across `test_reservation_command.py` and `test_contracts.py`. Lab 5's 29 are 20 in `test_workshop_cleanup.py` plus 9 in `deployment-tools/test_runtime_integration.py`, which a bare `pytest` collects together. Labs 2 and 3 have no test files; the notebook runner covers them. Live tests self-skip when credentials are absent, and [the CI workflow](.github/workflows/offline-gate.yml) asserts these four counts on every push so they cannot drift again.
+The suites, as they stand: 12 tests in Lab 1, 56 in Lab 4, 29 in Lab 5, and 40 in Lab 6. Of Lab 4's 56, the reservation command and its contracts account for 29, spread across `test_reservation_command.py` and `test_contracts.py`. Lab 5's 29 are 20 in `test_workshop_cleanup.py` plus 9 in `deployment-tools/test_runtime_integration.py`, which a bare `pytest` collects together. Labs 2 and 3 have no test files; the notebook runner covers them. Live tests self-skip when credentials are absent, and [the CI workflow](.github/workflows/offline-gate.yml) asserts these four counts on every push so they cannot drift again.
 
 ### Provision the AgentCore infrastructure (Lab 5 only)
 

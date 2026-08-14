@@ -14,6 +14,7 @@ test in that file's lab, and leave the write path pointed at an index the build
 never created.
 """
 
+import os
 from enum import StrEnum
 from typing import Final, Literal, NotRequired, TypedDict
 
@@ -48,6 +49,18 @@ LOCAL_NEO4J_ENV: Final = (*REQUIRED_NEO4J_ENV, "NEO4J_DATABASE")
 READ_SECRET_ID_ENV: Final = "NEO4J_READ_SECRET_ID"
 COMMAND_SECRET_ID_ENV: Final = "NEO4J_COMMAND_SECRET_ID"
 SECRET_FIELDS: Final = ("uri", "username", "password", "database")
+
+
+def graph_database() -> str:
+    """Return the Neo4j database every workshop session should open.
+
+    Read at call time rather than bound at import, so a `.env` the caller loads
+    afterwards is still honoured. Anything that opens a session or creates an
+    index goes through this, because a driver left on its home database while
+    the build writes elsewhere puts the data in one place and the indexes in
+    another, and that reads back as empty results with no error.
+    """
+    return os.environ.get("NEO4J_DATABASE") or DEFAULT_NEO4J_DATABASE
 
 
 class ReservationStatus(StrEnum):

@@ -71,7 +71,7 @@ cleanup.py
 # shared modules were flat-copied into this directory before the build. They now
 # live in the installable `workshop` package, so there is nothing to exclude.
 # The Runtime image still has to obtain that package, which is Lab 5's deploy
-# step to arrange; see the Phase 3 findings in new-content-plan.md.
+# step to arrange.
 
 # Bedrock AgentCore specific - keep config but exclude runtime files
 .bedrock_agentcore.yaml
